@@ -33,7 +33,7 @@
 // this
 #include "conf_board.h"
 #include "ii.h"
-	
+
 
 #define FIRSTRUN_KEY 0x22
 
@@ -126,6 +126,7 @@ u8 keyfirst_pos, keysecond_pos;
 s8 keycount_pos, keycount_series, keycount_cv;
 
 s8 pos, cut_pos, next_pos, drunk_step, triggered;
+
 u8 cv_chosen[2];
 u16 cv0, cv1;
 
@@ -140,6 +141,47 @@ u8 series_step;
 
 u16 adc[4];
 u8 SIZE, LENGTH, VARI;
+
+///////////////////////////////////////////////////////
+// tmp delcarations for tr (drum) mode
+typedef struct {
+	/* whale_pattern wp[16]; */
+	/* u16 series_list[64]; */
+	/* u8 series_start, series_end; */
+
+	u8 loop_start;
+    u8 loop_end;
+    u8 loop_len;
+    u8 loop_dir; // unused
+	u16 step_choice;
+	u8 cv_mode[2];
+	u8 tr_mode;
+	/* step_modes step_mode; */
+	u8 steps[16];
+	u8 step_probs[16];
+	u16 cv_values[16];
+	u16 cv_steps[2][16];
+	u16 cv_curves[2][16];
+	u8 cv_probs[2][16];
+
+    s8 pos;
+    s8 cut_pos;
+    s8 next_pos;
+    s8 drunk_step;
+    s8 triggered;
+    u8 mute;
+    u8 pattern;
+    u8 next_pattern;
+    u8 pattern_jump;
+
+} tr_row;
+
+// This might be easier to deal with as indexes
+tr_row tr_row_a;
+tr_row tr_row_b;
+tr_row tr_row_c;
+tr_row tr_row_d;
+
 
 typedef void(*re_t)(void);
 re_t re;
@@ -181,7 +223,44 @@ void flash_unfresh(void);
 void flash_write(void);
 void flash_read(void);
 
+// XXX: david prototypes
+void draw_trigger_row(u8 i1, u8 i2);
+void draw_trigger_probabilities(u8 i1);
 
+// XXX: david functions
+void draw_trigger_row(u8 i1, u8 i2) {
+    // XXX: this feels like a mess
+    //
+    if((w.wp[pattern].steps[i1] & (1<<i2)) && i1 == pos && (triggered & 1<<i2) && w.tr_mute[i2]) monomeLedBuffer[(i2+4)*16+i1] = 11;
+    // XXX: don't quite know what's happening here
+    // Need to decipher this I imagine it's related to step possibilities
+    else if(w.wp[pattern].steps[i1] & (1<<i2) && (w.wp[pattern].step_choice & 1<<i1)) monomeLedBuffer[(i2+4)*16+i1] = 4;
+    // draw notes that are pressed but not active
+    else if(w.wp[pattern].steps[i1] & (1<<i2)) monomeLedBuffer[(i2+4)*16+i1] = 7;
+    // draw tape head
+    else if(i1 == pos) monomeLedBuffer[(i2+4)*16+i1] = 4;
+    // clear out notes if they are not active
+    else monomeLedBuffer[(i2+4)*16+i1] = 0;
+}
+
+// TECH: don't care about this feature too much
+void draw_trigger_probabilities(u8 i1) {
+    monomeLedBuffer[64+i1] = 4;
+    monomeLedBuffer[80+i1] = 4;
+    monomeLedBuffer[96+i1] = 4;
+    monomeLedBuffer[112+i1] = 4;
+
+    if(w.wp[pattern].step_probs[i1] == 255)
+        monomeLedBuffer[48+i1] = 11;
+    else if(w.wp[pattern].step_probs[i1] == 0) {
+        monomeLedBuffer[48+i1] = 0;
+        monomeLedBuffer[112+i1] = 7;
+    }
+    else if(w.wp[pattern].step_probs[i1]) {
+        monomeLedBuffer[48+i1] = 4;
+        monomeLedBuffer[64+16*(3-(w.wp[pattern].step_probs[i1]>>6))+i1] = 7;
+    }
+}
 
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -195,6 +274,7 @@ void clock(u8 phase) {
 	static u16 found[16];
 
 	if(phase) {
+        // new step
 		gpio_set_gpio_pin(B10);
 
 
@@ -274,9 +354,9 @@ void clock(u8 phase) {
 			else if(drunk_step > 1) drunk_step = 1;
 
 			next_pos += drunk_step;
-			if(next_pos < 0) 
+			if(next_pos < 0)
 				next_pos = LENGTH;
-			else if(next_pos > LENGTH) 
+			else if(next_pos > LENGTH)
 				next_pos = 0;
 			else if(w.wp[pattern].loop_dir == 1 && next_pos < w.wp[pattern].loop_start)
 				next_pos = w.wp[pattern].loop_end;
@@ -301,13 +381,13 @@ void clock(u8 phase) {
 
 		// next pattern?
 		if(pos == w.wp[pattern].loop_end && w.wp[pattern].step_mode == mForward) {
-			if(edit_mode == mSeries) 
+			if(edit_mode == mSeries)
 				series_jump++;
 			else if(next_pattern != pattern)
 				pattern_jump++;
 		}
 		else if(pos == w.wp[pattern].loop_start && w.wp[pattern].step_mode == mReverse) {
-			if(edit_mode == mSeries) 
+			if(edit_mode == mSeries)
 				series_jump++;
 			else if(next_pattern != pattern)
 				pattern_jump++;
@@ -323,7 +403,7 @@ void clock(u8 phase) {
 		// TRIGGER
 		triggered = 0;
 		if((rnd() % 255) < w.wp[pattern].step_probs[pos]) {
-			
+
 			if(w.wp[pattern].step_choice & 1<<pos) {
 				count = 0;
 				for(i1=0;i1<4;i1++)
@@ -338,11 +418,11 @@ void clock(u8 phase) {
 					triggered = 1<<found[0];
 				else
 					triggered = 1<<found[rnd()%count];
-			}	
+			}
 			else {
 				triggered = w.wp[pattern].steps[pos];
 			}
-			
+
 			if(w.wp[pattern].tr_mode == 0) {
 				if(triggered & 0x1 && w.tr_mute[0]) gpio_set_gpio_pin(B00);
 				if(triggered & 0x2 && w.tr_mute[1]) gpio_set_gpio_pin(B01);
@@ -384,11 +464,11 @@ void clock(u8 phase) {
 						found[count] = i1;
 						count++;
 					}
-				if(count == 1) 
+				if(count == 1)
 					cv_chosen[0] = found[0];
 				else
 					cv_chosen[0] = found[rnd() % count];
-				cv0 = w.wp[pattern].cv_values[cv_chosen[0]];			
+				cv0 = w.wp[pattern].cv_values[cv_chosen[0]];
 			}
 		}
 
@@ -404,12 +484,12 @@ void clock(u8 phase) {
 						found[count] = i1;
 						count++;
 					}
-				if(count == 1) 
+				if(count == 1)
 					cv_chosen[1] = found[0];
 				else
 					cv_chosen[1] = found[rnd() % count];
 
-				cv1 = w.wp[pattern].cv_values[cv_chosen[1]];			
+				cv1 = w.wp[pattern].cv_values[cv_chosen[1]];
 			}
 		}
 
@@ -434,6 +514,7 @@ void clock(u8 phase) {
 	else {
 		gpio_clr_gpio_pin(B10);
 
+        // CLEAR TRIGGERS IF YOU SHOULD TURN THEM OFF
 		if(w.wp[pattern].tr_mode == 0) {
 			gpio_clr_gpio_pin(B00);
 			gpio_clr_gpio_pin(B01);
@@ -459,7 +540,7 @@ static softTimer_t monomeRefreshTimer  = { .next = NULL, .prev = NULL };
 
 
 
-static void clockTimer_callback(void* o) {  
+static void clockTimer_callback(void* o) {
 	// static event_t e;
 	// e.type = kEventTimer;
 	// e.data = 0;
@@ -473,14 +554,14 @@ static void clockTimer_callback(void* o) {
 	}
 }
 
-static void keyTimer_callback(void* o) {  
+static void keyTimer_callback(void* o) {
 	static event_t e;
 	e.type = kEventKeyTimer;
 	e.data = 0;
 	event_post(&e);
 }
 
-static void adcTimer_callback(void* o) {  
+static void adcTimer_callback(void* o) {
 	static event_t e;
 	e.type = kEventPollADC;
 	e.data = 0;
@@ -515,7 +596,7 @@ void timers_set_monome(void) {
 void timers_unset_monome(void) {
 	// print_dbg("\r\n unsetting monome timers");
 	timer_remove( &monomePollTimer );
-	timer_remove( &monomeRefreshTimer ); 
+	timer_remove( &monomeRefreshTimer );
 }
 
 
@@ -524,7 +605,7 @@ void timers_unset_monome(void) {
 // event handlers
 
 static void handler_FtdiConnect(s32 data) { ftdi_setup(); }
-static void handler_FtdiDisconnect(s32 data) { 
+static void handler_FtdiDisconnect(s32 data) {
 	timers_unset_monome();
 	// event_t e = { .type = kEventMonomeDisconnect };
 	// event_post(&e);
@@ -532,7 +613,7 @@ static void handler_FtdiDisconnect(s32 data) {
 
 static void handler_MonomeConnect(s32 data) {
 	u8 i1;
-	// print_dbg("\r\n// monome connect /////////////////"); 
+	// print_dbg("\r\n// monome connect /////////////////");
 	keycount_pos = 0;
 	key_count = 0;
 	SIZE = monome_size_x();
@@ -549,7 +630,7 @@ static void handler_MonomeConnect(s32 data) {
 	for(i1=0;i1<16;i1++)
 		if(w.wp[i1].loop_end > LENGTH)
 			w.wp[i1].loop_end = LENGTH;
-	
+
 
 	// monome_set_quadrant_flag(0);
 	// monome_set_quadrant_flag(1);
@@ -695,18 +776,18 @@ static void handler_KeyTimer(s32 data) {
 				}
 			}
 
-			// print_dbg("\rlong press: "); 
+			// print_dbg("\rlong press: ");
 			// print_dbg_ulong(held_keys[i1]);
 		}
 	}
 }
 
 static void handler_ClockNormal(s32 data) {
-	clock_external = !gpio_get_pin_value(B09); 
+	clock_external = !gpio_get_pin_value(B09);
 }
 
 static void handler_ClockExt(s32 data) {
-	clock(data); 
+	clock(data);
 }
 
 
@@ -716,15 +797,15 @@ static void handler_ClockExt(s32 data) {
 ////////////////////////////////////////////////////////////////////////////////
 // application grid code
 
-static void handler_MonomeGridKey(s32 data) { 
+static void handler_MonomeGridKey(s32 data) {
 	u8 x, y, z, index, i1, found, count;
 	s16 delta;
 	monome_grid_key_parse_event_data(data, &x, &y, &z);
-	// print_dbg("\r\n monome event; x: "); 
-	// print_dbg_hex(x); 
-	// print_dbg("; y: 0x"); 
-	// print_dbg_hex(y); 
-	// print_dbg("; z: 0x"); 
+	// print_dbg("\r\n monome event; x: ");
+	// print_dbg_hex(x);
+	// print_dbg("; y: 0x");
+	// print_dbg_hex(y);
+	// print_dbg("; z: 0x");
 	// print_dbg_hex(z);
 
 	//// TRACK LONG PRESSES
@@ -736,9 +817,9 @@ static void handler_MonomeGridKey(s32 data) {
 	} else {
 		found = 0; // "found"
 		for(i1 = 0; i1<key_count; i1++) {
-			if(held_keys[i1] == index) 
+			if(held_keys[i1] == index)
 				found++;
-			if(found) 
+			if(found)
 				held_keys[i1] = held_keys[i1+1];
 		}
 		key_count--;
@@ -781,7 +862,7 @@ static void handler_MonomeGridKey(s32 data) {
 		// glyph magic
 		if(z && x>7) {
 			glyph[y] ^= 1<<(x-8);
-			monomeFrameDirty++;	
+			monomeFrameDirty++;
 		}
 	}
 	// NOT PRESET
@@ -791,10 +872,12 @@ static void handler_MonomeGridKey(s32 data) {
 		//// SORT
 
 		// cut position
+        // Second row
+        // TODO: break this into cut for main track and a cut for separate tracks
 		if(y == 1) {
 			keycount_pos += z * 2 - 1;
 			if(keycount_pos < 0) keycount_pos = 0;
-			// print_dbg("\r\nkeycount: "); 
+			// print_dbg("\r\nkeycount: ");
 			// print_dbg_ulong(keycount_pos);
 
 			if(keycount_pos == 1 && z) {
@@ -836,7 +919,7 @@ static void handler_MonomeGridKey(s32 data) {
 					else if(x == 2 ) {
 						next_pos = (rnd() % (w.wp[pattern].loop_len + 1)) + w.wp[pattern].loop_start;
 						cut_pos = 1;
-						monomeFrameDirty++;					
+						monomeFrameDirty++;
 					}
 				}
 			}
@@ -853,12 +936,12 @@ static void handler_MonomeGridKey(s32 data) {
 	 			if(w.wp[pattern].loop_dir == 2)
 	 				w.wp[pattern].loop_len = (LENGTH - w.wp[pattern].loop_start) + w.wp[pattern].loop_end + 1;
 
-				// print_dbg("\r\nloop_len: "); 
+				// print_dbg("\r\nloop_len: ");
 				// print_dbg_ulong(w.wp[pattern].loop_len);
 			}
 		}
 
-		// top row
+		// top row branch
 		else if(y == 0) {
 			if(x == LENGTH) {
 				key_alt = z;
@@ -868,12 +951,16 @@ static void handler_MonomeGridKey(s32 data) {
 				}
 				monomeFrameDirty++;
 			}
+            // switch to drum mode
+            // A, B, C, D
 			else if(x < 4 && z) {
 				if(key_alt)
 					w.wp[pattern].tr_mode ^= 1;
 				else if(key_meta)
+                    // mute a given track
 					w.tr_mute[x] ^= 1;
-				else 
+				else
+                    // edit_mode is the enum for what is displayed
 					edit_mode = mTrig;
 				edit_prob = 0;
 				param_accept = 0;
@@ -900,6 +987,7 @@ static void handler_MonomeGridKey(s32 data) {
 				edit_prob = 0;
 
 				if(key_alt)
+                    // switches into key vs cv level mode
 					w.wp[pattern].cv_mode[edit_cv_ch] ^= 1;
 				else if(key_meta)
 					w.cv_mute[edit_cv_ch] ^= 1;
@@ -934,7 +1022,7 @@ static void handler_MonomeGridKey(s32 data) {
 				else {
 					if(w.wp[pattern].step_probs[x] == 255) w.wp[pattern].step_probs[x] = 0;
 					else w.wp[pattern].step_probs[x] = 255;
-				}	
+				}
 				monomeFrameDirty++;
 			}
 			else if(edit_prob == 1) {
@@ -945,8 +1033,8 @@ static void handler_MonomeGridKey(s32 data) {
 					else w.wp[pattern].step_probs[x] = 0;
 				}
 			}
-		}	
-		
+		}
+
 		// edit map and probs
 		else if(edit_mode == mMap) {
 			// step probs
@@ -957,7 +1045,7 @@ static void handler_MonomeGridKey(s32 data) {
 					if(w.wp[pattern].cv_probs[edit_cv_ch][x] == 255) w.wp[pattern].cv_probs[edit_cv_ch][x] = 0;
 					else w.wp[pattern].cv_probs[edit_cv_ch][x] = 255;
 				}
-					
+
 				monomeFrameDirty++;
 			}
 			// edit data
@@ -965,11 +1053,11 @@ static void handler_MonomeGridKey(s32 data) {
 				// CURVES
 				if(w.wp[pattern].cv_mode[edit_cv_ch] == 0) {
 					if(y == 4 && z) {
-						if(center) 
+						if(center)
 							delta = 3;
 						else if(key_alt)
 							delta = 409;
-						else						
+						else
 							delta = 34;
 
 						if(key_meta == 0) {
@@ -1037,7 +1125,7 @@ static void handler_MonomeGridKey(s32 data) {
 							live_in = 1;
 						}
 						else if(center && z) {
-							if(key_meta == 0) 
+							if(key_meta == 0)
 								w.wp[pattern].cv_curves[edit_cv_ch][x] = rand() % ((adc[1] / 34) * 34 + 1);
 							else {
 								for(i1=0;i1<16;i1++) {
@@ -1094,7 +1182,7 @@ static void handler_MonomeGridKey(s32 data) {
 							scale_select++;
 							monomeFrameDirty++;
 						}
-						// read pot					
+						// read pot
 						else if(y==7 && key_alt && edit_cv_value != -1 && x==LENGTH) {
 							param_accept = z;
 							param_dest = &(w.wp[pattern].cv_values[edit_cv_value]);
@@ -1114,7 +1202,7 @@ static void handler_MonomeGridKey(s32 data) {
 
 							if(y == 6)
 								delta *= -1;
-							
+
 							if(key_alt) {
 								for(i1=0;i1<16;i1++) {
 									if(w.wp[pattern].cv_values[i1] + delta > 4092)
@@ -1313,11 +1401,12 @@ static void refresh() {
 	}
 
 	// show pos loop dim
-	if(w.wp[pattern].loop_dir) {	
+    // TODO: this diffs on tape head movement, is confusing
+	if(w.wp[pattern].loop_dir) {
 		for(i1=0;i1<SIZE;i1++) {
 			if(w.wp[pattern].loop_dir == 1 && i1 >= w.wp[pattern].loop_start && i1 <= w.wp[pattern].loop_end)
 				monomeLedBuffer[16+i1] = 4;
-			else if(w.wp[pattern].loop_dir == 2 && (i1 <= w.wp[pattern].loop_end || i1 >= w.wp[pattern].loop_start)) 
+			else if(w.wp[pattern].loop_dir == 2 && (i1 <= w.wp[pattern].loop_end || i1 >= w.wp[pattern].loop_start))
 				monomeLedBuffer[16+i1] = 4;
 		}
 	}
@@ -1333,14 +1422,16 @@ static void refresh() {
 	// show step data
 	if(edit_mode == mTrig) {
 		if(edit_prob == 0) {
-			for(i1=0;i1<SIZE;i1++) {
-	 			for(i2=0;i2<4;i2++) {
-					if((w.wp[pattern].steps[i1] & (1<<i2)) && i1 == pos && (triggered & 1<<i2) && w.tr_mute[i2]) monomeLedBuffer[(i2+4)*16+i1] = 11;
-					else if(w.wp[pattern].steps[i1] & (1<<i2) && (w.wp[pattern].step_choice & 1<<i1)) monomeLedBuffer[(i2+4)*16+i1] = 4;
-					else if(w.wp[pattern].steps[i1] & (1<<i2)) monomeLedBuffer[(i2+4)*16+i1] = 7;
-					else if(i1 == pos) monomeLedBuffer[(i2+4)*16+i1] = 4;
-					else monomeLedBuffer[(i2+4)*16+i1] = 0;
-				}
+            for(i1=0;i1<SIZE;i1++) {
+                 // this interface should be
+                 // draw_trigger_row(tr_row_a);
+                 // draw_trigger_row(tr_row_b);
+                 // draw_trigger_row(tr_row_c);
+                 // draw_trigger_row(tr_row_d);
+                 draw_trigger_row(i1, 0);
+                 draw_trigger_row(i1, 1);
+                 draw_trigger_row(i1, 2);
+                 draw_trigger_row(i1, 3);
 
 				// probs
 				if(w.wp[pattern].step_probs[i1] == 255) monomeLedBuffer[48+i1] = 11;
@@ -1349,21 +1440,14 @@ static void refresh() {
 		}
 		else if(edit_prob == 1) {
 			for(i1=0;i1<SIZE;i1++) {
-				monomeLedBuffer[64+i1] = 4;
-				monomeLedBuffer[80+i1] = 4;
-				monomeLedBuffer[96+i1] = 4;
-				monomeLedBuffer[112+i1] = 4;
 
-				if(w.wp[pattern].step_probs[i1] == 255)
-					monomeLedBuffer[48+i1] = 11;
-				else if(w.wp[pattern].step_probs[i1] == 0) {
-					monomeLedBuffer[48+i1] = 0;
-					monomeLedBuffer[112+i1] = 7;
-				}
-				else if(w.wp[pattern].step_probs[i1]) {
-					monomeLedBuffer[48+i1] = 4;
-					monomeLedBuffer[64+16*(3-(w.wp[pattern].step_probs[i1]>>6))+i1] = 7;
-				}
+                // draw probabilities by offset
+                /* draw_trigger_probabilities(tr_row_a); */
+                /* draw_trigger_probabilities(tr_row_b); */
+                /* draw_trigger_probabilities(tr_row_c); */
+                /* draw_trigger_probabilities(tr_row_d); */
+                draw_trigger_probabilities(i1);
+
 			}
 		}
 	}
@@ -1437,9 +1521,9 @@ static void refresh() {
 						if(w.wp[pattern].cv_probs[edit_cv_ch][i1] == 255) monomeLedBuffer[48+i1] = 11;
 						else if(w.wp[pattern].cv_probs[edit_cv_ch][i1] > 0) monomeLedBuffer[48+i1] = 7;
 
-						monomeLedBuffer[64+i1] = (i1<8) * 4;						
-						monomeLedBuffer[80+i1] = (i1<8) * 4;						
-						monomeLedBuffer[96+i1] = (i1<8) * 4;						
+						monomeLedBuffer[64+i1] = (i1<8) * 4;
+						monomeLedBuffer[80+i1] = (i1<8) * 4;
+						monomeLedBuffer[96+i1] = (i1<8) * 4;
 						monomeLedBuffer[112+i1] = 0;
 					}
 
@@ -1481,7 +1565,7 @@ static void refresh() {
 
 			// scroll position helper
 			monomeLedBuffer[32+i1*16+((scroll_pos+i1)/(64/SIZE))] = 4;
-			
+
 			// sidebar selection indicators
 			if(i1+scroll_pos > w.series_start && i1+scroll_pos < w.series_end) {
 				monomeLedBuffer[32+i1*16] = 4;
@@ -1663,9 +1747,9 @@ static void refresh_mono() {
 						// probs
 						if(w.wp[pattern].cv_probs[edit_cv_ch][i1] > 0) monomeLedBuffer[48+i1] = 11;
 
-						monomeLedBuffer[64+i1] = 0;						
-						monomeLedBuffer[80+i1] = 0;						
-						monomeLedBuffer[96+i1] = 0;						
+						monomeLedBuffer[64+i1] = 0;
+						monomeLedBuffer[80+i1] = 0;
+						monomeLedBuffer[96+i1] = 0;
 						monomeLedBuffer[112+i1] = 0;
 					}
 
@@ -1707,7 +1791,7 @@ static void refresh_mono() {
 
 			// scroll position helper
 			// monomeLedBuffer[32+i1*16+((scroll_pos+i1)/(64/SIZE))] = 4;
-			
+
 			// sidebar selection indicators
 			if((key_meta || key_alt) && i1+scroll_pos > w.series_start && i1+scroll_pos < w.series_end) {
 				monomeLedBuffer[32+i1*16] = 11;
