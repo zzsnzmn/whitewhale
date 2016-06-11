@@ -154,14 +154,10 @@ typedef struct {
     u8 loop_len;
     u8 loop_dir; // unused
 	u16 step_choice;
-	u8 cv_mode[2];
 	u8 tr_mode;
 	/* step_modes step_mode; */
 	u8 steps[16];
 	u8 step_probs[16];
-	u16 cv_values[16];
-	u16 cv_steps[2][16];
-	u16 cv_curves[2][16];
 	u8 cv_probs[2][16];
 
     s8 pos;
@@ -173,14 +169,15 @@ typedef struct {
     u8 pattern;
     u8 next_pattern;
     u8 pattern_jump;
+    u8 pin;
 
 } tr_row;
 
 // This might be easier to deal with as indexes
-tr_row tr_row_a;
-tr_row tr_row_b;
-tr_row tr_row_c;
-tr_row tr_row_d;
+tr_row tr_row_1;
+tr_row tr_row_2;
+tr_row tr_row_3;
+tr_row tr_row_4;
 
 
 typedef void(*re_t)(void);
@@ -223,6 +220,44 @@ void flash_unfresh(void);
 void flash_write(void);
 void flash_read(void);
 
+// initializers
+//
+void set_tr_defaults(tr_row t);
+
+void set_tr_defaults(tr_row t) {
+	/* whale_pattern wp[16]; */
+	/* u16 series_list[64]; */
+	/* u8 series_start, series_end; */
+
+	t.loop_start = 0;
+    t.loop_end = 16;
+    t.loop_len = 8;
+    t.loop_dir = 0; // unused
+	t.step_choice = 0;
+	t.tr_mode = 0;
+    for (int i = 0; i < 16; i++) {
+        t.steps[i] = 0;
+    }
+	// u8 t.step_probs[16];
+	// u16 t.cv_values[16];
+	// u16 t.cv_steps[2][16];
+	// u16 t.cv_curves[2][16];
+	// u8 t.cv_probs[2][16];
+
+    t.pos = 0;
+    t.cut_pos = 0;
+    t.next_pos = 0;
+    t.drunk_step = 0;
+    t.triggered = 0 ;
+    t.mute = 0;
+    t.pattern = 0;
+    t.next_pattern = 0;
+    t.pattern_jump = 0;
+}
+
+
+
+
 // XXX: david prototypes
 void draw_trigger_row(u8 i1, u8 i2);
 void draw_trigger_probabilities(u8 i1);
@@ -230,7 +265,7 @@ void draw_trigger_probabilities(u8 i1);
 // XXX: david functions
 void draw_trigger_row(u8 i1, u8 i2) {
     // XXX: this feels like a mess
-    //
+
     if((w.wp[pattern].steps[i1] & (1<<i2)) && i1 == pos && (triggered & 1<<i2) && w.tr_mute[i2]) monomeLedBuffer[(i2+4)*16+i1] = 11;
     // XXX: don't quite know what's happening here
     // Need to decipher this I imagine it's related to step possibilities
@@ -262,6 +297,123 @@ void draw_trigger_probabilities(u8 i1) {
     }
 }
 
+
+void handle_trigger_mode_press(u8 x, u8 y, u8 z);
+void handle_trigger_mode_press(u8 x, u8 y, u8 z) {
+    // update current
+    if(z && y>3 && edit_prob == 0) {
+        if(key_alt)
+            w.wp[pattern].steps[pos] |=  1 << (y-4);
+        else if(key_meta) {
+            w.wp[pattern].step_choice ^= (1<<x);
+        }
+        else
+            w.wp[pattern].steps[x] ^= (1<<(y-4));
+        monomeFrameDirty++;
+    }
+    // step probs
+    else if(z && y==3) {
+        if(key_alt)
+            edit_prob = 1;
+        else {
+            if(w.wp[pattern].step_probs[x] == 255) w.wp[pattern].step_probs[x] = 0;
+            else w.wp[pattern].step_probs[x] = 255;
+        }
+        monomeFrameDirty++;
+    }
+    else if(edit_prob == 1) {
+        if(z) {
+            if(y == 4) w.wp[pattern].step_probs[x] = 192;
+            else if(y == 5) w.wp[pattern].step_probs[x] = 128;
+            else if(y == 6) w.wp[pattern].step_probs[x] = 64;
+            else w.wp[pattern].step_probs[x] = 0;
+        }
+    }
+
+    if(z) {
+        /* tr_row_4.steps[x] ^= 1; */
+        switch(y) {
+            case 7:
+                tr_row_4.steps[x] ^= 1;
+                break;
+            case 6:
+                tr_row_3.steps[x] ^= 1;
+                break;
+            case 5:
+                tr_row_2.steps[x] ^= 1;
+                break;
+            case 4:
+                tr_row_1.steps[x] ^= 1;
+                break;
+            default :
+                break;
+        }
+    }
+}
+
+
+void new_trigger_pulse(tr_row t);
+void new_trigger_pulse(tr_row t) {
+    triggered = 0;
+    triggered = t.steps[pos];
+
+    if(t.tr_mode == 0 && triggered && t.mute)
+        gpio_set_gpio_pin(t.pin);
+    else if(t.mute && triggered)
+        gpio_set_gpio_pin(t.pin);
+    else
+        gpio_clr_gpio_pin(t.pin);
+}
+
+void trigger_pulse(u8 i1, u8 count, u16 found[]);
+
+void trigger_pulse(u8 i1, u8 count, u16 found[]) {
+    // TRIGGER
+    triggered = 0;
+    if(w.wp[pattern].step_choice & 1<<pos) {
+        count = 0;
+        for(i1=0;i1<4;i1++)
+            if(w.wp[pattern].steps[pos] >> i1 & 1) {
+                found[count] = i1;
+                count++;
+            }
+
+        if(count == 0)
+            triggered = 0;
+        else if(count == 1)
+            triggered = 1<<found[0];
+        else
+            triggered = 1<<found[rnd()%count];
+    }
+    else {
+        triggered = w.wp[pattern].steps[pos];
+    }
+
+    if(w.wp[pattern].tr_mode == 0) {
+        if(triggered & 0x1 && w.tr_mute[0]) gpio_set_gpio_pin(B00);
+        if(triggered & 0x2 && w.tr_mute[1]) gpio_set_gpio_pin(B01);
+        if(triggered & 0x4 && w.tr_mute[2]) gpio_set_gpio_pin(B02);
+        if(triggered & 0x8 && w.tr_mute[3]) gpio_set_gpio_pin(B03);
+    } else {
+        if(w.tr_mute[0]) {
+            if(triggered & 0x1) gpio_set_gpio_pin(B00);
+            else gpio_clr_gpio_pin(B00);
+        }
+        if(w.tr_mute[1]) {
+            if(triggered & 0x2) gpio_set_gpio_pin(B01);
+            else gpio_clr_gpio_pin(B01);
+        }
+        if(w.tr_mute[2]) {
+            if(triggered & 0x4) gpio_set_gpio_pin(B02);
+            else gpio_clr_gpio_pin(B02);
+        }
+        if(w.tr_mute[3]) {
+            if(triggered & 0x8) gpio_set_gpio_pin(B03);
+            else gpio_clr_gpio_pin(B03);
+        }
+
+    }
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
@@ -398,55 +550,7 @@ void cv_pulse(u8 i1, u8 count, u16 found[]) {
     if(edit_mode == mSeries)
         series_step++;
 
-
-    // TRIGGER
-    triggered = 0;
-    if((rnd() % 255) < w.wp[pattern].step_probs[pos]) {
-
-        if(w.wp[pattern].step_choice & 1<<pos) {
-            count = 0;
-            for(i1=0;i1<4;i1++)
-                if(w.wp[pattern].steps[pos] >> i1 & 1) {
-                    found[count] = i1;
-                    count++;
-                }
-
-            if(count == 0)
-                triggered = 0;
-            else if(count == 1)
-                triggered = 1<<found[0];
-            else
-                triggered = 1<<found[rnd()%count];
-        }
-        else {
-            triggered = w.wp[pattern].steps[pos];
-        }
-
-        if(w.wp[pattern].tr_mode == 0) {
-            if(triggered & 0x1 && w.tr_mute[0]) gpio_set_gpio_pin(B00);
-            if(triggered & 0x2 && w.tr_mute[1]) gpio_set_gpio_pin(B01);
-            if(triggered & 0x4 && w.tr_mute[2]) gpio_set_gpio_pin(B02);
-            if(triggered & 0x8 && w.tr_mute[3]) gpio_set_gpio_pin(B03);
-        } else {
-            if(w.tr_mute[0]) {
-                if(triggered & 0x1) gpio_set_gpio_pin(B00);
-                else gpio_clr_gpio_pin(B00);
-            }
-            if(w.tr_mute[1]) {
-                if(triggered & 0x2) gpio_set_gpio_pin(B01);
-                else gpio_clr_gpio_pin(B01);
-            }
-            if(w.tr_mute[2]) {
-                if(triggered & 0x4) gpio_set_gpio_pin(B02);
-                else gpio_clr_gpio_pin(B02);
-            }
-            if(w.tr_mute[3]) {
-                if(triggered & 0x8) gpio_set_gpio_pin(B03);
-                else gpio_clr_gpio_pin(B03);
-            }
-
-        }
-    }
+    trigger_pulse(i1, count, found);
 
     monomeFrameDirty++;
 
@@ -519,6 +623,11 @@ void clock(u8 phase) {
     // clock pulse
 	if(phase) {
         cv_pulse(i1, count, found);
+        // trigger_pulse(i1, count, found);
+        new_trigger_pulse(tr_row_1);
+        new_trigger_pulse(tr_row_2);
+        new_trigger_pulse(tr_row_3);
+        new_trigger_pulse(tr_row_4);
 	}
 	else {
         // clock led pin
@@ -1016,34 +1125,7 @@ static void handler_MonomeGridKey(s32 data) {
 
 		// toggle steps and prob control
 		else if(edit_mode == mTrig) {
-			if(z && y>3 && edit_prob == 0) {
-				if(key_alt)
-					w.wp[pattern].steps[pos] |=  1 << (y-4);
-				else if(key_meta) {
-					w.wp[pattern].step_choice ^= (1<<x);
-				}
-				else
-					w.wp[pattern].steps[x] ^= (1<<(y-4));
-				monomeFrameDirty++;
-			}
-			// step probs
-			else if(z && y==3) {
-				if(key_alt)
-					edit_prob = 1;
-				else {
-					if(w.wp[pattern].step_probs[x] == 255) w.wp[pattern].step_probs[x] = 0;
-					else w.wp[pattern].step_probs[x] = 255;
-				}
-				monomeFrameDirty++;
-			}
-			else if(edit_prob == 1) {
-				if(z) {
-					if(y == 4) w.wp[pattern].step_probs[x] = 192;
-					else if(y == 5) w.wp[pattern].step_probs[x] = 128;
-					else if(y == 6) w.wp[pattern].step_probs[x] = 64;
-					else w.wp[pattern].step_probs[x] = 0;
-				}
-			}
+            handle_trigger_mode_press(x, y, z);
 		}
 
 		// edit map and probs
@@ -1435,10 +1517,10 @@ static void refresh() {
 		if(edit_prob == 0) {
             for(i1=0;i1<SIZE;i1++) {
                  // this interface should be
-                 // draw_trigger_row(tr_row_a);
-                 // draw_trigger_row(tr_row_b);
-                 // draw_trigger_row(tr_row_c);
-                 // draw_trigger_row(tr_row_d);
+                 // draw_trigger_row(tr_row_1);
+                 // draw_trigger_row(tr_row_2);
+                 // draw_trigger_row(tr_row_3);
+                 // draw_trigger_row(tr_row_4);
                  draw_trigger_row(i1, 0);
                  draw_trigger_row(i1, 1);
                  draw_trigger_row(i1, 2);
@@ -1453,10 +1535,10 @@ static void refresh() {
 			for(i1=0;i1<SIZE;i1++) {
 
                 // draw probabilities by offset
-                /* draw_trigger_probabilities(tr_row_a); */
-                /* draw_trigger_probabilities(tr_row_b); */
-                /* draw_trigger_probabilities(tr_row_c); */
-                /* draw_trigger_probabilities(tr_row_d); */
+                /* draw_trigger_probabilities(tr_row_1); */
+                /* draw_trigger_probabilities(tr_row_2); */
+                /* draw_trigger_probabilities(tr_row_3); */
+                /* draw_trigger_probabilities(tr_row_4); */
                 draw_trigger_probabilities(i1);
 
 			}
@@ -2153,6 +2235,17 @@ int main(void)
 		for(i1=0;i1<8;i1++)
 			glyph[i1] = flashy.glyph[preset_select][i1];
 	}
+
+    set_tr_defaults(tr_row_1);
+    set_tr_defaults(tr_row_2);
+    set_tr_defaults(tr_row_3);
+    set_tr_defaults(tr_row_4);
+    tr_row_1.loop_end = 4;
+    tr_row_3.loop_end = 6;
+    tr_row_1.pin = B00;
+    tr_row_2.pin = B01;
+    tr_row_3.pin = B02;
+    tr_row_4.pin = B03;
 
 	LENGTH = 15;
 	SIZE = 16;
