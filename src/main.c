@@ -246,7 +246,7 @@ void set_tr_defaults(tr_row t) {
 
     t.pos = 0;
     t.cut_pos = 0;
-    t.next_pos = 0;
+    t.next_pos = 1;
     t.drunk_step = 0;
     t.triggered = 0 ;
     t.mute = 0;
@@ -259,26 +259,8 @@ void set_tr_defaults(tr_row t) {
 
 
 // XXX: david prototypes
-void draw_trigger_row(u8 i1, u8 i2);
-void draw_trigger_probabilities(u8 i1);
-
-// XXX: david functions
-void draw_trigger_row(u8 i1, u8 i2) {
-    // XXX: this feels like a mess
-
-    if((w.wp[pattern].steps[i1] & (1<<i2)) && i1 == pos && (triggered & 1<<i2) && w.tr_mute[i2]) monomeLedBuffer[(i2+4)*16+i1] = 11;
-    // XXX: don't quite know what's happening here
-    // Need to decipher this I imagine it's related to step possibilities
-    else if(w.wp[pattern].steps[i1] & (1<<i2) && (w.wp[pattern].step_choice & 1<<i1)) monomeLedBuffer[(i2+4)*16+i1] = 4;
-    // draw notes that are pressed but not active
-    else if(w.wp[pattern].steps[i1] & (1<<i2)) monomeLedBuffer[(i2+4)*16+i1] = 7;
-    // draw tape head
-    else if(i1 == pos) monomeLedBuffer[(i2+4)*16+i1] = 4;
-    // clear out notes if they are not active
-    else monomeLedBuffer[(i2+4)*16+i1] = 0;
-}
-
 // TECH: don't care about this feature too much
+void draw_trigger_probabilities(u8 i1);
 void draw_trigger_probabilities(u8 i1) {
     monomeLedBuffer[64+i1] = 4;
     monomeLedBuffer[80+i1] = 4;
@@ -295,6 +277,41 @@ void draw_trigger_probabilities(u8 i1) {
         monomeLedBuffer[48+i1] = 4;
         monomeLedBuffer[64+16*(3-(w.wp[pattern].step_probs[i1]>>6))+i1] = 7;
     }
+}
+
+// 0..15, 0..3
+
+void draw_trigger_row(u8 i1, u8 i2);
+void draw_trigger_row(u8 i1, u8 i2) {
+    // XXX: this feels like a mess
+
+    // if note is active
+    if((w.wp[pattern].steps[i1] & (1<<i2)) && i1 == pos && (triggered & 1<<i2) && w.tr_mute[i2]) monomeLedBuffer[(i2+4)*16+i1] = 11;
+    // XXX: don't quite know what's happening here
+    // Need to decipher this I imagine it's related to step possibilities
+    else if(w.wp[pattern].steps[i1] & (1<<i2) && (w.wp[pattern].step_choice & 1<<i1)) monomeLedBuffer[(i2+4)*16+i1] = 4;
+    // draw notes that are pressed but not active
+    else if(w.wp[pattern].steps[i1] & (1<<i2)) monomeLedBuffer[(i2+4)*16+i1] = 7;
+    // draw tape head
+    else if(i1 == pos) monomeLedBuffer[(i2+4)*16+i1] = 4;
+    // clear out notes if they are not active
+    else monomeLedBuffer[(i2+4)*16+i1] = 0;
+}
+
+void new_draw_trigger_row(u8 i1, u8 i2, tr_row t);
+void new_draw_trigger_row(u8 i1, u8 i2, tr_row t) {
+
+    // if(t.steps[i1] && i1 == t.pos && (triggered & 1<<i2) /*&& w.tr_mute[i2]*/) monomeLedBuffer[(i2+4)*16+i1] = 11;
+    if(t.steps[i1] && i1 == pos) monomeLedBuffer[(i2+4)*16+i1] = 11;
+    // XXX: don't quite know what's happening here
+    // Need to decipher this I imagine it's related to step possibilities
+    /* else if(w.wp[pattern].steps[i1] & (1<<i2) && (w.wp[pattern].step_choice & 1<<i1)) monomeLedBuffer[(i2+4)*16+i1] = 4; */
+    // draw notes that are pressed but not active
+	else if(t.steps[i1]) monomeLedBuffer[(i2+4)*16+i1] = 7;
+    // draw tape head
+	else if(i1 == t.pos) monomeLedBuffer[(i2+4)*16+i1] = 4;
+    // clear out notes if they are not active
+    else monomeLedBuffer[(i2+4)*16+i1] = 0;
 }
 
 
@@ -354,8 +371,12 @@ void handle_trigger_mode_press(u8 x, u8 y, u8 z) {
 
 void new_trigger_pulse(tr_row t);
 void new_trigger_pulse(tr_row t) {
-    triggered = 0;
-    triggered = t.steps[pos];
+	t.pos += 1;
+	/* t.pos = t.pos % 15; */
+	t.pos = t.pos % t.loop_end;
+
+    /* triggered = 0; */
+	triggered = t.steps[t.pos];
 
     if(t.tr_mode == 0 && triggered && t.mute)
         gpio_set_gpio_pin(t.pin);
@@ -366,7 +387,6 @@ void new_trigger_pulse(tr_row t) {
 }
 
 void trigger_pulse(u8 i1, u8 count, u16 found[]);
-
 void trigger_pulse(u8 i1, u8 count, u16 found[]) {
     // TRIGGER
     triggered = 0;
@@ -421,17 +441,19 @@ void trigger_pulse(u8 i1, u8 count, u16 found[]) {
 ////////////////////////////////////////////////////////////////////////////////
 // application clock code
 
-/* void cv_pulse(u8 i1, u8 count, u16 found[16]); */
 void cv_pulse(u8 i1, u8 count, u16 found[]);
-
 void cv_pulse(u8 i1, u8 count, u16 found[]) {
     // new step
     gpio_set_gpio_pin(B10);
 
-
     if(pattern_jump) {
         pattern = next_pattern;
         next_pos = w.wp[pattern].loop_start;
+		// TODO: put this is trigger pulse
+		/* tr_row_1.next_pos = w.wp[pattern].loop_start; */
+		/* tr_row_2.next_pos = w.wp[pattern].loop_start; */
+		/* tr_row_3.next_pos = w.wp[pattern].loop_start; */
+		/* tr_row_4.next_pos = w.wp[pattern].loop_start; */
         pattern_jump = 0;
     }
     // for series mode and delayed pattern change
@@ -623,7 +645,6 @@ void clock(u8 phase) {
     // clock pulse
 	if(phase) {
         cv_pulse(i1, count, found);
-        // trigger_pulse(i1, count, found);
         new_trigger_pulse(tr_row_1);
         new_trigger_pulse(tr_row_2);
         new_trigger_pulse(tr_row_3);
@@ -1515,16 +1536,22 @@ static void refresh() {
 	// show step data
 	if(edit_mode == mTrig) {
 		if(edit_prob == 0) {
+
+			// 0..15, 0..3
             for(i1=0;i1<SIZE;i1++) {
                  // this interface should be
-                 // draw_trigger_row(tr_row_1);
-                 // draw_trigger_row(tr_row_2);
-                 // draw_trigger_row(tr_row_3);
-                 // draw_trigger_row(tr_row_4);
-                 draw_trigger_row(i1, 0);
-                 draw_trigger_row(i1, 1);
-                 draw_trigger_row(i1, 2);
-                 draw_trigger_row(i1, 3);
+                 // new_draw_trigger_row(tr_row_1);
+                 // new_draw_trigger_row(tr_row_2);
+                 // new_draw_trigger_row(tr_row_3);
+                 // new_draw_trigger_row(tr_row_4);
+				 new_draw_trigger_row(i1, 0, tr_row_1);
+				 new_draw_trigger_row(i1, 1, tr_row_2);
+				 new_draw_trigger_row(i1, 2, tr_row_3);
+				 new_draw_trigger_row(i1, 3, tr_row_4);
+                 /* draw_trigger_row(i1, 0); */
+                 /* draw_trigger_row(i1, 1); */
+                 /* draw_trigger_row(i1, 2); */
+                 /* draw_trigger_row(i1, 3); */
 
 				// probs
 				if(w.wp[pattern].step_probs[i1] == 255) monomeLedBuffer[48+i1] = 11;
