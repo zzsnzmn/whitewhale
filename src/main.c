@@ -189,8 +189,6 @@ __attribute__((__section__(".flash_nvram")))
 static nvram_data_t flashy;
 
 
-
-
 ////////////////////////////////////////////////////////////////////////////////
 // prototypes
 
@@ -222,21 +220,21 @@ void flash_read(void);
 
 // initializers
 //
-void set_tr_defaults(tr_row t);
+void set_tr_defaults(tr_row *t);
 
-void set_tr_defaults(tr_row t) {
+void set_tr_defaults(tr_row *t) {
 	/* whale_pattern wp[16]; */
 	/* u16 series_list[64]; */
 	/* u8 series_start, series_end; */
 
-	t.loop_start = 0;
-    t.loop_end = 16;
-    t.loop_len = 8;
-    t.loop_dir = 0; // unused
-	t.step_choice = 0;
-	t.tr_mode = 0;
+	t->loop_start = 0;
+    t->loop_end = 16;
+    t->loop_len = 8;
+    t->loop_dir = 0; // unused
+	t->step_choice = 0;
+	t->tr_mode = 0;
     for (int i = 0; i < 16; i++) {
-        t.steps[i] = 0;
+        t->steps[i] = 0;
     }
 	// u8 t.step_probs[16];
 	// u16 t.cv_values[16];
@@ -244,15 +242,15 @@ void set_tr_defaults(tr_row t) {
 	// u16 t.cv_curves[2][16];
 	// u8 t.cv_probs[2][16];
 
-    t.pos = 0;
-    t.cut_pos = 0;
-    t.next_pos = 1;
-    t.drunk_step = 0;
-    t.triggered = 0 ;
-    t.mute = 0;
-    t.pattern = 0;
-    t.next_pattern = 0;
-    t.pattern_jump = 0;
+    t->pos = 0;
+    t->cut_pos = 0;
+    t->next_pos = 1;
+    t->drunk_step = 0;
+    t->triggered = 0 ;
+    t->mute = 1;
+    t->pattern = 0;
+    t->next_pattern = 0;
+    t->pattern_jump = 0;
 }
 
 
@@ -298,20 +296,22 @@ void draw_trigger_row(u8 i1, u8 i2) {
     else monomeLedBuffer[(i2+4)*16+i1] = 0;
 }
 
-void new_draw_trigger_row(u8 i1, u8 i2, tr_row t);
-void new_draw_trigger_row(u8 i1, u8 i2, tr_row t) {
-
-    // if(t.steps[i1] && i1 == t.pos && (triggered & 1<<i2) /*&& w.tr_mute[i2]*/) monomeLedBuffer[(i2+4)*16+i1] = 11;
-    if(t.steps[i1] && i1 == pos) monomeLedBuffer[(i2+4)*16+i1] = 11;
-    // XXX: don't quite know what's happening here
-    // Need to decipher this I imagine it's related to step possibilities
-    /* else if(w.wp[pattern].steps[i1] & (1<<i2) && (w.wp[pattern].step_choice & 1<<i1)) monomeLedBuffer[(i2+4)*16+i1] = 4; */
-    // draw notes that are pressed but not active
-	else if(t.steps[i1]) monomeLedBuffer[(i2+4)*16+i1] = 7;
-    // draw tape head
-	else if(i1 == t.pos) monomeLedBuffer[(i2+4)*16+i1] = 4;
-    // clear out notes if they are not active
-    else monomeLedBuffer[(i2+4)*16+i1] = 0;
+void new_draw_trigger_row(u8 i2, tr_row *t);
+void new_draw_trigger_row(u8 i2, tr_row *t) {
+    u8 i1;
+    for(i1=0;i1<SIZE;i1++) {
+        // if(t.steps[i1] && i1 == t.pos && (triggered & 1<<i2) /*&& w.tr_mute[i2]*/) monomeLedBuffer[(i2+4)*16+i1] = 11;
+        if(t->steps[i1] && i1 == t->pos) monomeLedBuffer[(i2+4)*16+i1] = 11;
+        // XXX: don't quite know what's happening here
+        // Need to decipher this I imagine it's related to step possibilities
+        /* else if(w.wp[pattern].steps[i1] & (1<<i2) && (w.wp[pattern].step_choice & 1<<i1)) monomeLedBuffer[(i2+4)*16+i1] = 4; */
+        // draw notes that are pressed but not active
+        else if(t->steps[i1]) monomeLedBuffer[(i2+4)*16+i1] = 7;
+        // draw tape head
+        else if(i1 == t->pos) monomeLedBuffer[(i2+4)*16+i1] = 4;
+        // clear out notes if they are not active
+        else monomeLedBuffer[(i2+4)*16+i1] = 0;
+    }
 }
 
 
@@ -369,21 +369,23 @@ void handle_trigger_mode_press(u8 x, u8 y, u8 z) {
 }
 
 
-void new_trigger_pulse(tr_row t);
-void new_trigger_pulse(tr_row t) {
-	t.pos += 1;
-	/* t.pos = t.pos % 15; */
-	t.pos = t.pos % t.loop_end;
+// pass by reference T_T
+void new_trigger_pulse(tr_row *t);
+void new_trigger_pulse(tr_row *t) {
+	t->pos++;
+    if(t->pos > t->loop_end) t->pos = 0;
 
     /* triggered = 0; */
-	triggered = t.steps[t.pos];
+	/* triggered = t->steps[t->pos]; */
 
-    if(t.tr_mode == 0 && triggered && t.mute)
-        gpio_set_gpio_pin(t.pin);
-    else if(t.mute && triggered)
-        gpio_set_gpio_pin(t.pin);
+    if(t->tr_mode == 0 && t->steps[t->pos] && t->mute)
+        gpio_set_gpio_pin(t->pin);
+    else if(t->mute && triggered)
+        gpio_set_gpio_pin(t->pin);
     else
-        gpio_clr_gpio_pin(t.pin);
+        gpio_clr_gpio_pin(t->pin);
+
+    monomeFrameDirty++;
 }
 
 void trigger_pulse(u8 i1, u8 count, u16 found[]);
@@ -572,7 +574,8 @@ void cv_pulse(u8 i1, u8 count, u16 found[]) {
     if(edit_mode == mSeries)
         series_step++;
 
-    trigger_pulse(i1, count, found);
+    // trigger_pulse nooo
+    // trigger_pulse(i1, count, found);
 
     monomeFrameDirty++;
 
@@ -644,11 +647,11 @@ void clock(u8 phase) {
 
     // clock pulse
 	if(phase) {
+        new_trigger_pulse(&tr_row_1);
+        new_trigger_pulse(&tr_row_2);
+        new_trigger_pulse(&tr_row_3);
+        new_trigger_pulse(&tr_row_4);
         cv_pulse(i1, count, found);
-        new_trigger_pulse(tr_row_1);
-        new_trigger_pulse(tr_row_2);
-        new_trigger_pulse(tr_row_3);
-        new_trigger_pulse(tr_row_4);
 	}
 	else {
         // clock led pin
@@ -678,7 +681,6 @@ static softTimer_t keyTimer = { .next = NULL, .prev = NULL };
 static softTimer_t adcTimer = { .next = NULL, .prev = NULL };
 static softTimer_t monomePollTimer = { .next = NULL, .prev = NULL };
 static softTimer_t monomeRefreshTimer  = { .next = NULL, .prev = NULL };
-
 
 
 static void clockTimer_callback(void* o) {
@@ -1537,6 +1539,12 @@ static void refresh() {
 	if(edit_mode == mTrig) {
 		if(edit_prob == 0) {
 
+
+            new_draw_trigger_row(0, &tr_row_1);
+            new_draw_trigger_row(1, &tr_row_2);
+            new_draw_trigger_row(2, &tr_row_3);
+            new_draw_trigger_row(3, &tr_row_4);
+
 			// 0..15, 0..3
             for(i1=0;i1<SIZE;i1++) {
                  // this interface should be
@@ -1544,10 +1552,6 @@ static void refresh() {
                  // new_draw_trigger_row(tr_row_2);
                  // new_draw_trigger_row(tr_row_3);
                  // new_draw_trigger_row(tr_row_4);
-				 new_draw_trigger_row(i1, 0, tr_row_1);
-				 new_draw_trigger_row(i1, 1, tr_row_2);
-				 new_draw_trigger_row(i1, 2, tr_row_3);
-				 new_draw_trigger_row(i1, 3, tr_row_4);
                  /* draw_trigger_row(i1, 0); */
                  /* draw_trigger_row(i1, 1); */
                  /* draw_trigger_row(i1, 2); */
@@ -2263,12 +2267,14 @@ int main(void)
 			glyph[i1] = flashy.glyph[preset_select][i1];
 	}
 
-    set_tr_defaults(tr_row_1);
-    set_tr_defaults(tr_row_2);
-    set_tr_defaults(tr_row_3);
-    set_tr_defaults(tr_row_4);
-    tr_row_1.loop_end = 4;
-    tr_row_3.loop_end = 6;
+    set_tr_defaults(&tr_row_1);
+    set_tr_defaults(&tr_row_2);
+    set_tr_defaults(&tr_row_3);
+    set_tr_defaults(&tr_row_4);
+    tr_row_1.loop_end = 3;
+    tr_row_2.loop_end = 7;
+    tr_row_3.loop_end = 5;
+    tr_row_4.loop_end = 2;
     tr_row_1.pin = B00;
     tr_row_2.pin = B01;
     tr_row_3.pin = B02;
