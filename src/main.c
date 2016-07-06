@@ -318,6 +318,7 @@ void new_draw_trigger_row(u8 i2, tr_row *t) {
 void handle_trigger_mode_press(u8 x, u8 y, u8 z);
 void handle_trigger_mode_press(u8 x, u8 y, u8 z) {
     // update current
+    // might be able to pull this out
     if(z && y>3 && edit_prob == 0) {
         if(key_alt)
             w.wp[pattern].steps[pos] |=  1 << (y-4);
@@ -347,8 +348,33 @@ void handle_trigger_mode_press(u8 x, u8 y, u8 z) {
         }
     }
 
-    if(z) {
-        /* tr_row_4.steps[x] ^= 1; */
+    // TODO: keep track of whether or not a key is held
+    // now we just naively set loop end to alt+pressed value
+    if(z && key_alt) {
+        switch(y) {
+            case 7:
+                tr_row_4.loop_end = x;
+                tr_row_4.loop_len = tr_row_4.loop_end;
+                break;
+            case 6:
+                tr_row_3.loop_end = x;
+                tr_row_3.loop_len = tr_row_3.loop_end;
+                break;
+            case 5:
+                tr_row_2.loop_end = x;
+                tr_row_2.loop_len = tr_row_2.loop_end;
+                break;
+            case 4:
+                tr_row_1.loop_end = x;
+                tr_row_1.loop_len = tr_row_1.loop_end;
+                break;
+            default :
+                break;
+        }
+    }
+    // if we press any of the trigger rows
+    // TODO: could check if y > 4
+    else if(z) {
         switch(y) {
             case 7:
                 tr_row_4.steps[x] ^= 1;
@@ -370,9 +396,11 @@ void handle_trigger_mode_press(u8 x, u8 y, u8 z) {
 
 
 // pass by reference T_T
-void new_trigger_pulse(tr_row *t);
-void new_trigger_pulse(tr_row *t) {
+void trigger_pulse(tr_row *t);
+void trigger_pulse(tr_row *t) {
 	t->pos++;
+    // TODO
+    // This should track the individual start position
     if(t->pos > t->loop_end) t->pos = 0;
 
     /* triggered = 0; */
@@ -386,55 +414,6 @@ void new_trigger_pulse(tr_row *t) {
         gpio_clr_gpio_pin(t->pin);
 
     monomeFrameDirty++;
-}
-
-void trigger_pulse(u8 i1, u8 count, u16 found[]);
-void trigger_pulse(u8 i1, u8 count, u16 found[]) {
-    // TRIGGER
-    triggered = 0;
-    if(w.wp[pattern].step_choice & 1<<pos) {
-        count = 0;
-        for(i1=0;i1<4;i1++)
-            if(w.wp[pattern].steps[pos] >> i1 & 1) {
-                found[count] = i1;
-                count++;
-            }
-
-        if(count == 0)
-            triggered = 0;
-        else if(count == 1)
-            triggered = 1<<found[0];
-        else
-            triggered = 1<<found[rnd()%count];
-    }
-    else {
-        triggered = w.wp[pattern].steps[pos];
-    }
-
-    if(w.wp[pattern].tr_mode == 0) {
-        if(triggered & 0x1 && w.tr_mute[0]) gpio_set_gpio_pin(B00);
-        if(triggered & 0x2 && w.tr_mute[1]) gpio_set_gpio_pin(B01);
-        if(triggered & 0x4 && w.tr_mute[2]) gpio_set_gpio_pin(B02);
-        if(triggered & 0x8 && w.tr_mute[3]) gpio_set_gpio_pin(B03);
-    } else {
-        if(w.tr_mute[0]) {
-            if(triggered & 0x1) gpio_set_gpio_pin(B00);
-            else gpio_clr_gpio_pin(B00);
-        }
-        if(w.tr_mute[1]) {
-            if(triggered & 0x2) gpio_set_gpio_pin(B01);
-            else gpio_clr_gpio_pin(B01);
-        }
-        if(w.tr_mute[2]) {
-            if(triggered & 0x4) gpio_set_gpio_pin(B02);
-            else gpio_clr_gpio_pin(B02);
-        }
-        if(w.tr_mute[3]) {
-            if(triggered & 0x8) gpio_set_gpio_pin(B03);
-            else gpio_clr_gpio_pin(B03);
-        }
-
-    }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -451,11 +430,6 @@ void cv_pulse(u8 i1, u8 count, u16 found[]) {
     if(pattern_jump) {
         pattern = next_pattern;
         next_pos = w.wp[pattern].loop_start;
-		// TODO: put this is trigger pulse
-		/* tr_row_1.next_pos = w.wp[pattern].loop_start; */
-		/* tr_row_2.next_pos = w.wp[pattern].loop_start; */
-		/* tr_row_3.next_pos = w.wp[pattern].loop_start; */
-		/* tr_row_4.next_pos = w.wp[pattern].loop_start; */
         pattern_jump = 0;
     }
     // for series mode and delayed pattern change
@@ -574,9 +548,6 @@ void cv_pulse(u8 i1, u8 count, u16 found[]) {
     if(edit_mode == mSeries)
         series_step++;
 
-    // trigger_pulse nooo
-    // trigger_pulse(i1, count, found);
-
     monomeFrameDirty++;
 
 
@@ -647,10 +618,10 @@ void clock(u8 phase) {
 
     // clock pulse
 	if(phase) {
-        new_trigger_pulse(&tr_row_1);
-        new_trigger_pulse(&tr_row_2);
-        new_trigger_pulse(&tr_row_3);
-        new_trigger_pulse(&tr_row_4);
+        trigger_pulse(&tr_row_1);
+        trigger_pulse(&tr_row_2);
+        trigger_pulse(&tr_row_3);
+        trigger_pulse(&tr_row_4);
         cv_pulse(i1, count, found);
 	}
 	else {
@@ -666,9 +637,6 @@ void clock(u8 phase) {
 			gpio_clr_gpio_pin(B03);
 		}
  	}
-
-	// print_dbg("\r\n pos: ");
-	// print_dbg_ulong(pos);
 }
 
 
