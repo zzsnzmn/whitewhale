@@ -171,6 +171,9 @@ typedef struct {
     u8 pattern_jump;
     u8 pin;
 
+    u8 held_keys;
+    u8 first_press;
+
 } tr_row;
 
 // This might be easier to deal with as indexes
@@ -242,6 +245,8 @@ void set_tr_defaults(tr_row *t) {
 	// u16 t.cv_curves[2][16];
 	// u8 t.cv_probs[2][16];
 
+    t->held_keys = 0;
+    t->first_press = 0;
     t->pos = 0;
     t->cut_pos = 0;
     t->next_pos = 1;
@@ -296,6 +301,7 @@ void draw_trigger_row(u8 i1, u8 i2) {
     else monomeLedBuffer[(i2+4)*16+i1] = 0;
 }
 
+// TODO: delete other draw trigger row
 void new_draw_trigger_row(u8 i2, tr_row *t);
 void new_draw_trigger_row(u8 i2, tr_row *t) {
     u8 i1;
@@ -348,25 +354,49 @@ void handle_trigger_mode_press(u8 x, u8 y, u8 z) {
         }
     }
 
-    // TODO: keep track of whether or not a key is held
-    // now we just naively set loop end to alt+pressed value
+    // TODO: dry this up
+    // maybe track functions in a container struct?
     if(z && key_alt) {
         switch(y) {
             case 7:
-                tr_row_4.loop_end = x;
-                tr_row_4.loop_len = tr_row_4.loop_end;
+                tr_row_4.held_keys++;
+                if(tr_row_4.held_keys == 1)
+                    tr_row_4.first_press = x;
+                if(tr_row_4.held_keys == 2) {
+                    tr_row_4.loop_end = x;
+                    tr_row_4.loop_start = tr_row_4.first_press;
+                    tr_row_4.loop_len = tr_row_4.loop_end - tr_row_4.loop_start;
+                }
                 break;
             case 6:
-                tr_row_3.loop_end = x;
-                tr_row_3.loop_len = tr_row_3.loop_end;
+                tr_row_3.held_keys++;
+                if(tr_row_3.held_keys == 1)
+                    tr_row_3.first_press = x;
+                if(tr_row_3.held_keys == 2) {
+                    tr_row_3.loop_end = x;
+                    tr_row_3.loop_start = tr_row_3.first_press;
+                    tr_row_3.loop_len = tr_row_3.loop_end - tr_row_3.loop_start;
+                }
                 break;
             case 5:
-                tr_row_2.loop_end = x;
-                tr_row_2.loop_len = tr_row_2.loop_end;
+                tr_row_2.held_keys++;
+                if(tr_row_2.held_keys == 1)
+                    tr_row_2.first_press = x;
+                if(tr_row_2.held_keys == 2) {
+                    tr_row_2.loop_end = x;
+                    tr_row_2.loop_start = tr_row_2.first_press;
+                    tr_row_2.loop_len = tr_row_2.loop_end - tr_row_2.loop_start;
+                }
                 break;
             case 4:
-                tr_row_1.loop_end = x;
-                tr_row_1.loop_len = tr_row_1.loop_end;
+                tr_row_1.held_keys++;
+                if(tr_row_1.held_keys == 1)
+                    tr_row_1.first_press = x;
+                if(tr_row_1.held_keys == 2) {
+                    tr_row_1.loop_end = x;
+                    tr_row_1.loop_start = tr_row_1.first_press;
+                    tr_row_1.loop_len = tr_row_1.loop_end - tr_row_1.loop_start;
+                }
                 break;
             default :
                 break;
@@ -374,6 +404,24 @@ void handle_trigger_mode_press(u8 x, u8 y, u8 z) {
     }
     // if we press any of the trigger rows
     // TODO: could check if y > 4
+    else if(z == 0 && key_alt) {
+        switch(y) {
+            case 7:
+                tr_row_4.held_keys--;
+                break;
+            case 6:
+                tr_row_3.held_keys--;
+                break;
+            case 5:
+                tr_row_2.held_keys--;
+                break;
+            case 4:
+                tr_row_1.held_keys--;
+                break;
+            default :
+                break;
+        }
+    }
     else if(z) {
         switch(y) {
             case 7:
@@ -391,17 +439,21 @@ void handle_trigger_mode_press(u8 x, u8 y, u8 z) {
             default :
                 break;
         }
+    } else if(key_alt == 0) {
+        tr_row_1.held_keys = 0;
+        tr_row_2.held_keys = 0;
+        tr_row_3.held_keys = 0;
+        tr_row_4.held_keys = 0;
     }
 }
 
 
-// pass by reference T_T
 void trigger_pulse(tr_row *t);
 void trigger_pulse(tr_row *t) {
 	t->pos++;
     // TODO
     // This should track the individual start position
-    if(t->pos > t->loop_end) t->pos = 0;
+    if(t->pos > t->loop_end) t->pos = t->loop_start;
 
     /* triggered = 0; */
 	/* triggered = t->steps[t->pos]; */
