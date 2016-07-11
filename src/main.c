@@ -231,8 +231,8 @@ void set_tr_defaults(tr_row *t) {
 	/* u8 series_start, series_end; */
 
 	t->loop_start = 0;
-    t->loop_end = 16;
-    t->loop_len = 8;
+    t->loop_end = 15;
+    t->loop_len = 15;
     t->loop_dir = 0; // unused
 	t->step_choice = 0;
 	t->tr_mode = 0;
@@ -247,9 +247,9 @@ void set_tr_defaults(tr_row *t) {
 
     t->held_keys = 0;
     t->first_press = 0;
-    t->pos = 0;
+    t->pos = pos;
     t->cut_pos = 0;
-    t->next_pos = 1;
+    t->next_pos = 0;
     t->drunk_step = 0;
     t->triggered = 0 ;
     t->mute = 1;
@@ -2291,10 +2291,10 @@ int main(void)
     set_tr_defaults(&tr_row_2);
     set_tr_defaults(&tr_row_3);
     set_tr_defaults(&tr_row_4);
-    tr_row_1.loop_end = 3;
-    tr_row_2.loop_end = 7;
-    tr_row_3.loop_end = 5;
-    tr_row_4.loop_end = 2;
+    /* tr_row_1.loop_end = 3; */
+    /* tr_row_2.loop_end = 7; */
+    /* tr_row_3.loop_end = 5; */
+    /* tr_row_4.loop_end = 2; */
     tr_row_1.pin = B00;
     tr_row_2.pin = B01;
     tr_row_3.pin = B02;
