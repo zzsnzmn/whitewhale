@@ -33,7 +33,7 @@
 // this
 #include "conf_board.h"
 #include "ii.h"
-	
+
 
 #define FIRSTRUN_KEY 0x22
 
@@ -126,6 +126,7 @@ u8 keyfirst_pos, keysecond_pos;
 s8 keycount_pos, keycount_series, keycount_cv;
 
 s8 pos, cut_pos, next_pos, drunk_step, triggered;
+
 u8 cv_chosen[2];
 u16 cv0, cv1;
 
@@ -141,6 +142,47 @@ u8 series_step;
 u16 adc[4];
 u8 SIZE, LENGTH, VARI;
 
+///////////////////////////////////////////////////////
+// tmp delcarations for tr (drum) mode
+typedef struct {
+	/* whale_pattern wp[16]; */
+	/* u16 series_list[64]; */
+	/* u8 series_start, series_end; */
+
+	u8 loop_start;
+    u8 loop_end;
+    u8 loop_len;
+    u8 loop_dir; // unused
+	u16 step_choice;
+	u8 tr_mode;
+	/* step_modes step_mode; */
+	u8 steps[16];
+	u8 step_probs[16];
+	u8 cv_probs[2][16];
+
+    s8 pos;
+    s8 cut_pos;
+    s8 next_pos;
+    s8 drunk_step;
+    s8 triggered;
+    u8 mute;
+    u8 pattern;
+    u8 next_pattern;
+    u8 pattern_jump;
+    u8 pin;
+
+    u8 held_keys;
+    u8 first_press;
+
+} tr_row;
+
+// This might be easier to deal with as indexes
+tr_row tr_row_1;
+tr_row tr_row_2;
+tr_row tr_row_3;
+tr_row tr_row_4;
+
+
 typedef void(*re_t)(void);
 re_t re;
 
@@ -148,8 +190,6 @@ re_t re;
 // NVRAM data structure located in the flash array.
 __attribute__((__section__(".flash_nvram")))
 static nvram_data_t flashy;
-
-
 
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -181,8 +221,598 @@ void flash_unfresh(void);
 void flash_write(void);
 void flash_read(void);
 
+// initializers
+//
+void set_tr_defaults(tr_row *t);
+
+void set_tr_defaults(tr_row *t) {
+	/* whale_pattern wp[16]; */
+	/* u16 series_list[64]; */
+	/* u8 series_start, series_end; */
+
+	t->loop_start = 0;
+    t->loop_end = 15;
+    t->loop_len = 15;
+    t->loop_dir = 0; // unused
+	t->step_choice = 0;
+	t->tr_mode = 0;
+    for (int i = 0; i < 16; i++) {
+        t->steps[i] = 0;
+    }
+	// u8 t.step_probs[16];
+	// u16 t.cv_values[16];
+	// u16 t.cv_steps[2][16];
+	// u16 t.cv_curves[2][16];
+	// u8 t.cv_probs[2][16];
+
+    t->held_keys = 0;
+    t->first_press = 0;
+    t->pos = pos;
+    t->cut_pos = 0;
+    t->next_pos = 0;
+    t->drunk_step = 0;
+    t->triggered = 0 ;
+    t->mute = 1;
+    t->pattern = 0;
+    t->next_pattern = 0;
+    t->pattern_jump = 0;
+}
 
 
+
+
+// XXX: david prototypes
+// TECH: don't care about this feature too much
+void draw_trigger_probabilities(u8 i1);
+void draw_trigger_probabilities(u8 i1) {
+    monomeLedBuffer[64+i1] = 4;
+    monomeLedBuffer[80+i1] = 4;
+    monomeLedBuffer[96+i1] = 4;
+    monomeLedBuffer[112+i1] = 4;
+
+    if(w.wp[pattern].step_probs[i1] == 255)
+        monomeLedBuffer[48+i1] = 11;
+    else if(w.wp[pattern].step_probs[i1] == 0) {
+        monomeLedBuffer[48+i1] = 0;
+        monomeLedBuffer[112+i1] = 7;
+    }
+    else if(w.wp[pattern].step_probs[i1]) {
+        monomeLedBuffer[48+i1] = 4;
+        monomeLedBuffer[64+16*(3-(w.wp[pattern].step_probs[i1]>>6))+i1] = 7;
+    }
+}
+
+// 0..15, 0..3
+
+void draw_trigger_row(u8 i1, u8 i2);
+void draw_trigger_row(u8 i1, u8 i2) {
+    // XXX: this feels like a mess
+
+    // if note is active
+    if((w.wp[pattern].steps[i1] & (1<<i2)) && i1 == pos && (triggered & 1<<i2) && w.tr_mute[i2]) monomeLedBuffer[(i2+4)*16+i1] = 11;
+    // XXX: don't quite know what's happening here
+    // Need to decipher this I imagine it's related to step possibilities
+    else if(w.wp[pattern].steps[i1] & (1<<i2) && (w.wp[pattern].step_choice & 1<<i1)) monomeLedBuffer[(i2+4)*16+i1] = 4;
+    // draw notes that are pressed but not active
+    else if(w.wp[pattern].steps[i1] & (1<<i2)) monomeLedBuffer[(i2+4)*16+i1] = 7;
+    // draw tape head
+    else if(i1 == pos) monomeLedBuffer[(i2+4)*16+i1] = 4;
+    // clear out notes if they are not active
+    else monomeLedBuffer[(i2+4)*16+i1] = 0;
+}
+
+// TODO: delete other draw trigger row
+void new_draw_trigger_row(u8 i2, tr_row *t);
+void new_draw_trigger_row(u8 i2, tr_row *t) {
+    u8 i1;
+    for(i1=0;i1<SIZE;i1++) {
+        // if(t.steps[i1] && i1 == t.pos && (triggered & 1<<i2) /*&& w.tr_mute[i2]*/) monomeLedBuffer[(i2+4)*16+i1] = 11;
+        if(t->steps[i1] && i1 == t->pos) monomeLedBuffer[(i2+4)*16+i1] = 11;
+        // XXX: don't quite know what's happening here
+        // Need to decipher this I imagine it's related to step possibilities
+        /* else if(w.wp[pattern].steps[i1] & (1<<i2) && (w.wp[pattern].step_choice & 1<<i1)) monomeLedBuffer[(i2+4)*16+i1] = 4; */
+        // draw notes that are pressed but not active
+        else if(t->steps[i1]) monomeLedBuffer[(i2+4)*16+i1] = 7;
+        // draw tape head
+        else if(i1 == t->pos) monomeLedBuffer[(i2+4)*16+i1] = 4;
+        // clear out notes if they are not active
+        else monomeLedBuffer[(i2+4)*16+i1] = 0;
+    }
+}
+
+
+void handle_trigger_mode_press(u8 x, u8 y, u8 z);
+void handle_trigger_mode_press(u8 x, u8 y, u8 z) {
+    // update current
+    // might be able to pull this out
+    if(z && y>3 && edit_prob == 0) {
+        if(key_alt)
+            w.wp[pattern].steps[pos] |=  1 << (y-4);
+        else if(key_meta) {
+            w.wp[pattern].step_choice ^= (1<<x);
+        }
+        else
+            w.wp[pattern].steps[x] ^= (1<<(y-4));
+        monomeFrameDirty++;
+    }
+    // step probs
+    else if(z && y==3) {
+        if(key_alt)
+            edit_prob = 1;
+        else {
+            if(w.wp[pattern].step_probs[x] == 255) w.wp[pattern].step_probs[x] = 0;
+            else w.wp[pattern].step_probs[x] = 255;
+        }
+        monomeFrameDirty++;
+    }
+    else if(edit_prob == 1) {
+        if(z) {
+            if(y == 4) w.wp[pattern].step_probs[x] = 192;
+            else if(y == 5) w.wp[pattern].step_probs[x] = 128;
+            else if(y == 6) w.wp[pattern].step_probs[x] = 64;
+            else w.wp[pattern].step_probs[x] = 0;
+        }
+    }
+
+    // TODO: dry this up
+    // maybe track functions in a container struct?
+    if(z && key_alt) {
+        switch(y) {
+            case 7:
+                tr_row_4.held_keys++;
+                if(tr_row_4.held_keys == 1)
+                    tr_row_4.first_press = x;
+                if(tr_row_4.held_keys == 2) {
+                    tr_row_4.loop_end = x;
+                    tr_row_4.loop_start = tr_row_4.first_press;
+                    tr_row_4.loop_len = tr_row_4.loop_end - tr_row_4.loop_start;
+                }
+                break;
+            case 6:
+                tr_row_3.held_keys++;
+                if(tr_row_3.held_keys == 1)
+                    tr_row_3.first_press = x;
+                if(tr_row_3.held_keys == 2) {
+                    tr_row_3.loop_end = x;
+                    tr_row_3.loop_start = tr_row_3.first_press;
+                    tr_row_3.loop_len = tr_row_3.loop_end - tr_row_3.loop_start;
+                }
+                break;
+            case 5:
+                tr_row_2.held_keys++;
+                if(tr_row_2.held_keys == 1)
+                    tr_row_2.first_press = x;
+                if(tr_row_2.held_keys == 2) {
+                    tr_row_2.loop_end = x;
+                    tr_row_2.loop_start = tr_row_2.first_press;
+                    tr_row_2.loop_len = tr_row_2.loop_end - tr_row_2.loop_start;
+                }
+                break;
+            case 4:
+                tr_row_1.held_keys++;
+                if(tr_row_1.held_keys == 1)
+                    tr_row_1.first_press = x;
+                if(tr_row_1.held_keys == 2) {
+                    tr_row_1.loop_end = x;
+                    tr_row_1.loop_start = tr_row_1.first_press;
+                    tr_row_1.loop_len = tr_row_1.loop_end - tr_row_1.loop_start;
+                }
+                break;
+            default :
+                break;
+        }
+    }
+    // if we press any of the trigger rows
+    // TODO: could check if y > 4
+    else if(z == 0 && key_alt) {
+        switch(y) {
+            case 7:
+                tr_row_4.held_keys--;
+                break;
+            case 6:
+                tr_row_3.held_keys--;
+                break;
+            case 5:
+                tr_row_2.held_keys--;
+                break;
+            case 4:
+                tr_row_1.held_keys--;
+                break;
+            default :
+                break;
+        }
+    }
+    else if(z) {
+        switch(y) {
+            case 7:
+                tr_row_4.steps[x] ^= 1;
+                break;
+            case 6:
+                tr_row_3.steps[x] ^= 1;
+                break;
+            case 5:
+                tr_row_2.steps[x] ^= 1;
+                break;
+            case 4:
+                tr_row_1.steps[x] ^= 1;
+                break;
+            default :
+                break;
+        }
+    } else if(key_alt == 0) {
+        tr_row_1.held_keys = 0;
+        tr_row_2.held_keys = 0;
+        tr_row_3.held_keys = 0;
+        tr_row_4.held_keys = 0;
+    }
+}
+
+void handle_series_mode_press(u8 x, u8 y, u8 z, u8 index);
+void handle_series_mode_press(u8 x, u8 y, u8 z, u8 index) {
+    u8 i1, count;
+	if(z && key_alt) {
+		if(x == 0)
+			series_next = y-2+scroll_pos;
+		else if(x == LENGTH-1)
+			w.series_start = y-2+scroll_pos;
+		else if(x == LENGTH)
+			w.series_end = y-2+scroll_pos;
+
+		if(w.series_end < w.series_start)
+			w.series_end = w.series_start;
+	}
+	else {
+		keycount_series += z*2-1;
+		if(keycount_series < 0)
+			keycount_series = 0;
+
+		if(z) {
+			count = 0;
+			for(i1=0;i1<16;i1++)
+				count += (w.series_list[y-2+scroll_pos] >> i1) & 1;
+
+			// single press toggle
+			if(keycount_series == 1 && count < 2) {
+				w.series_list[y-2+scroll_pos] = (1<<x);
+			}
+			// multi-select
+			else if(keycount_series > 1 || count > 1) {
+				w.series_list[y-2+scroll_pos] ^= (1<<x);
+
+				// ensure not fully clear
+				if(!w.series_list[y-2+scroll_pos])
+					w.series_list[y-2+scroll_pos] = (1<<x);
+			}
+		}
+	}
+	monomeFrameDirty++;
+}
+
+// FIXME: index can be derived separately
+void handle_map_mode_press(u8 x, u8 y, u8 z, u8 index);
+void handle_map_mode_press(u8 x, u8 y, u8 z, u8 index) {
+    u8 i1, count;
+	s16 delta;
+	// step probs
+	if(z && y==3) {
+		if(key_alt)
+			edit_prob = 1;
+		else  {
+			if(w.wp[pattern].cv_probs[edit_cv_ch][x] == 255) w.wp[pattern].cv_probs[edit_cv_ch][x] = 0;
+			else w.wp[pattern].cv_probs[edit_cv_ch][x] = 255;
+		}
+
+		monomeFrameDirty++;
+	}
+	// edit data
+	else if(edit_prob == 0) {
+		// CURVES
+		if(w.wp[pattern].cv_mode[edit_cv_ch] == 0) {
+			if(y == 4 && z) {
+				if(center)
+					delta = 3;
+				else if(key_alt)
+					delta = 409;
+				else
+					delta = 34;
+
+				if(key_meta == 0) {
+					// saturate
+					if(w.wp[pattern].cv_curves[edit_cv_ch][x] + delta < 4092)
+						w.wp[pattern].cv_curves[edit_cv_ch][x] += delta;
+					else
+						w.wp[pattern].cv_curves[edit_cv_ch][x] = 4092;
+				}
+				else {
+					for(i1=0;i1<16;i1++) {
+						// saturate
+						if(w.wp[pattern].cv_curves[edit_cv_ch][i1] + delta < 4092)
+							w.wp[pattern].cv_curves[edit_cv_ch][i1] += delta;
+						else
+							w.wp[pattern].cv_curves[edit_cv_ch][i1] = 4092;
+					}
+				}
+			}
+			else if(y == 6 && z) {
+				if(center)
+					delta = 3;
+				else if(key_alt)
+					delta = 409;
+				else
+					delta = 34;
+
+				if(key_meta == 0) {
+					// saturate
+					if(w.wp[pattern].cv_curves[edit_cv_ch][x] > delta)
+						w.wp[pattern].cv_curves[edit_cv_ch][x] -= delta;
+					else
+						w.wp[pattern].cv_curves[edit_cv_ch][x] = 0;
+				}
+				else {
+					for(i1=0;i1<16;i1++) {
+						// saturate
+						if(w.wp[pattern].cv_curves[edit_cv_ch][i1] > delta)
+							w.wp[pattern].cv_curves[edit_cv_ch][i1] -= delta;
+						else
+							w.wp[pattern].cv_curves[edit_cv_ch][i1] = 0;
+					}
+				}
+
+			}
+			else if(y == 5) {
+				if(z == 1) {
+					center = 1;
+					if(quantize_in)
+						quantize_in = 0;
+					else if(key_alt)
+						w.wp[pattern].cv_curves[edit_cv_ch][x] = clip;
+					else
+						clip = w.wp[pattern].cv_curves[edit_cv_ch][x];
+				}
+				else
+					center = 0;
+			}
+			else if(y == 7) {
+				if(key_alt && z) {
+					param_dest = &w.wp[pattern].cv_curves[edit_cv_ch][pos];
+					w.wp[pattern].cv_curves[edit_cv_ch][pos] = (adc[1] / 34) * 34;
+					quantize_in = 1;
+					param_accept = 1;
+					live_in = 1;
+				}
+				else if(center && z) {
+					if(key_meta == 0)
+						w.wp[pattern].cv_curves[edit_cv_ch][x] = rand() % ((adc[1] / 34) * 34 + 1);
+					else {
+						for(i1=0;i1<16;i1++) {
+							w.wp[pattern].cv_curves[edit_cv_ch][i1] = rand() % ((adc[1] / 34) * 34 + 1);
+						}
+					}
+				}
+				else {
+					param_accept = z;
+					param_dest = &w.wp[pattern].cv_curves[edit_cv_ch][x];
+					if(z) {
+						w.wp[pattern].cv_curves[edit_cv_ch][x] = (adc[1] / 34) * 34;
+						quantize_in = 1;
+					}
+					else
+						quantize_in = 0;
+				}
+				monomeFrameDirty++;
+			}
+		}
+		// MAP
+		else {
+			if(scale_select && z) {
+				// index -= 64;
+				index = (y-4) * 8 + x;
+				if(index < 24 && y<8) {
+					for(i1=0;i1<16;i1++)
+						w.wp[pattern].cv_values[i1] = SCALES[index][i1];
+					print_dbg("\rNEW SCALE ");
+					print_dbg_ulong(index);
+				}
+
+				scale_select = 0;
+				monomeFrameDirty++;
+			}
+			else {
+				if(z && y==4) {
+					edit_cv_step = x;
+					count = 0;
+					for(i1=0;i1<16;i1++)
+							if((w.wp[pattern].cv_steps[edit_cv_ch][edit_cv_step] >> i1) & 1) {
+								count++;
+								edit_cv_value = i1;
+							}
+					if(count>1)
+						edit_cv_value = -1;
+
+					keycount_cv = 0;
+
+					monomeFrameDirty++;
+				}
+				// load scale
+				else if(key_alt && y==7 && x == 0 && z) {
+					scale_select++;
+					monomeFrameDirty++;
+				}
+				// read pot
+				else if(y==7 && key_alt && edit_cv_value != -1 && x==LENGTH) {
+					param_accept = z;
+					param_dest = &(w.wp[pattern].cv_values[edit_cv_value]);
+					// print_dbg("\r\nparam: ");
+					// print_dbg_ulong(*param_dest);
+				}
+				else if((y == 5 || y == 6) && z && x<4 && edit_cv_step != -1) {
+					delta = 0;
+					if(x == 0)
+						delta = 409;
+					else if(x == 1)
+						delta = 239;
+					else if(x == 2)
+						delta = 34;
+					else if(x == 3)
+						delta = 3;
+
+					if(y == 6)
+						delta *= -1;
+
+					if(key_alt) {
+						for(i1=0;i1<16;i1++) {
+							if(w.wp[pattern].cv_values[i1] + delta > 4092)
+								w.wp[pattern].cv_values[i1] = 4092;
+							else if(delta < 0 && w.wp[pattern].cv_values[i1] < -1*delta)
+								w.wp[pattern].cv_values[i1] = 0;
+							else
+								w.wp[pattern].cv_values[i1] += delta;
+						}
+					}
+					else {
+						if(w.wp[pattern].cv_values[edit_cv_value] + delta > 4092)
+							w.wp[pattern].cv_values[edit_cv_value] = 4092;
+						else if(delta < 0 && w.wp[pattern].cv_values[edit_cv_value] < -1*delta)
+							w.wp[pattern].cv_values[edit_cv_value] = 0;
+						else
+							w.wp[pattern].cv_values[edit_cv_value] += delta;
+					}
+
+					monomeFrameDirty++;
+				}
+				// choose values
+				else if(y==7) {
+					keycount_cv += z*2-1;
+					if(keycount_cv < 0)
+						keycount_cv = 0;
+
+					if(z) {
+						count = 0;
+						for(i1=0;i1<16;i1++)
+							if((w.wp[pattern].cv_steps[edit_cv_ch][edit_cv_step] >> i1) & 1)
+								count++;
+
+						// single press toggle
+						if(keycount_cv == 1 && count < 2) {
+							w.wp[pattern].cv_steps[edit_cv_ch][edit_cv_step] = (1<<x);
+							edit_cv_value = x;
+						}
+						// multiselect
+						else if(keycount_cv > 1 || count > 1) {
+							w.wp[pattern].cv_steps[edit_cv_ch][edit_cv_step] ^= (1<<x);
+
+							if(!w.wp[pattern].cv_steps[edit_cv_ch][edit_cv_step])
+								w.wp[pattern].cv_steps[edit_cv_ch][edit_cv_step] = (1<<x);
+
+							count = 0;
+							for(i1=0;i1<16;i1++)
+								if((w.wp[pattern].cv_steps[edit_cv_ch][edit_cv_step] >> i1) & 1) {
+									count++;
+									edit_cv_value = i1;
+								}
+
+							if(count > 1)
+								edit_cv_value = -1;
+						}
+
+						monomeFrameDirty++;
+					}
+				}
+			}
+		}
+	}
+	else if(edit_prob == 1) {
+		if(z) {
+			if(y == 4) w.wp[pattern].cv_probs[edit_cv_ch][x] = 192;
+			else if(y == 5) w.wp[pattern].cv_probs[edit_cv_ch][x] = 128;
+			else if(y == 6) w.wp[pattern].cv_probs[edit_cv_ch][x] = 64;
+			else w.wp[pattern].cv_probs[edit_cv_ch][x] = 0;
+		}
+	}
+}
+
+void handle_top_row_mode_select(u8 x, u8 y, u8 z);
+void handle_top_row_mode_select(u8 x, u8 y, u8 z) {
+	if(x == LENGTH) {
+		key_alt = z;
+		if(z == 0) {
+			param_accept = 0;
+			live_in = 0;
+		}
+		monomeFrameDirty++;
+	}
+    // switch to drum mode
+    // A, B, C, D
+	else if(x < 4 && z) {
+		if(key_alt)
+			w.wp[pattern].tr_mode ^= 1;
+		else if(key_meta)
+            // mute a given track
+			w.tr_mute[x] ^= 1;
+		else
+            // edit_mode is the enum for what is displayed
+			edit_mode = mTrig;
+		edit_prob = 0;
+		param_accept = 0;
+		monomeFrameDirty++;
+	}
+	else if(SIZE==16 && x > 3 && x < 12 && z) {
+		param_accept = 0;
+		edit_cv_ch = (x-4)/4;
+		edit_prob = 0;
+
+		if(key_alt)
+			w.wp[pattern].cv_mode[edit_cv_ch] ^= 1;
+		else if(key_meta)
+			w.cv_mute[edit_cv_ch] ^= 1;
+		else
+			edit_mode = mMap;
+
+		monomeFrameDirty++;
+	}
+	else if(SIZE==8 && (x == 4 || x == 5) && z) {
+		param_accept = 0;
+		edit_cv_ch = x-4;
+		edit_mode = mMap;
+		edit_prob = 0;
+
+		if(key_alt)
+            // switches into key vs cv level mode
+			w.wp[pattern].cv_mode[edit_cv_ch] ^= 1;
+		else if(key_meta)
+			w.cv_mute[edit_cv_ch] ^= 1;
+
+		monomeFrameDirty++;
+	}
+	else if(x == LENGTH-1 && z && key_alt) {
+		edit_mode = mSeries;
+		monomeFrameDirty++;
+	}
+	else if(x == LENGTH-1)
+		key_meta = z;
+}
+
+
+
+void trigger_pulse(tr_row *t);
+void trigger_pulse(tr_row *t) {
+	t->pos++;
+    // TODO
+    // This should track the individual start position
+    if(t->pos > t->loop_end) t->pos = t->loop_start;
+
+    /* triggered = 0; */
+	/* triggered = t->steps[t->pos]; */
+
+    if(t->tr_mode == 0 && t->steps[t->pos] && t->mute)
+        gpio_set_gpio_pin(t->pin);
+    else if(t->mute && triggered)
+        gpio_set_gpio_pin(t->pin);
+    else
+        gpio_clr_gpio_pin(t->pin);
+
+    monomeFrameDirty++;
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
@@ -190,260 +820,221 @@ void flash_read(void);
 ////////////////////////////////////////////////////////////////////////////////
 // application clock code
 
+void cv_pulse(u8 i1, u8 count, u16 found[]);
+void cv_pulse(u8 i1, u8 count, u16 found[]) {
+    /* static u8 i1, count; */
+    /* static u16 found[16]; */
+    /* u8 count; */
+    /* u16 found[]; */
+    // new step
+    gpio_set_gpio_pin(B10);
+
+    if(pattern_jump) {
+        pattern = next_pattern;
+        next_pos = w.wp[pattern].loop_start;
+        pattern_jump = 0;
+    }
+
+    // for series mode and delayed pattern change
+    if(series_jump) {
+        series_pos = series_next;
+        if(series_pos == w.series_end)
+            series_next = w.series_start;
+        else {
+            series_next++;
+            if(series_next>63)
+                series_next = w.series_start;
+        }
+
+        count = 0;
+        for(i1=0;i1<16;i1++) {
+            if((w.series_list[series_pos] >> i1) & 1) {
+                found[count] = i1;
+                count++;
+            }
+        }
+
+        // what is found
+        if(count == 1)
+            next_pattern = found[0];
+        else {
+            next_pattern = found[rnd()%count];
+        }
+
+        pattern = next_pattern;
+        series_playing = pattern;
+        if(w.wp[pattern].step_mode == mReverse)
+            next_pos = w.wp[pattern].loop_end;
+        else
+            next_pos = w.wp[pattern].loop_start;
+
+        series_jump = 0;
+        series_step = 0;
+    }
+
+    pos = next_pos;
+
+    // live param record
+    if(param_accept && live_in) {
+        param_dest = &w.wp[pattern].cv_curves[edit_cv_ch][pos];
+        w.wp[pattern].cv_curves[edit_cv_ch][pos] = adc[1];
+    }
+
+    // calc next step
+    if(w.wp[pattern].step_mode == mForward) { 		// FORWARD
+        if(pos == w.wp[pattern].loop_end) next_pos = w.wp[pattern].loop_start;
+        else if(pos >= LENGTH) next_pos = 0;
+        else next_pos++;
+        cut_pos = 0;
+    }
+    else if(w.wp[pattern].step_mode == mReverse) {	// REVERSE
+        if(pos == w.wp[pattern].loop_start)
+            next_pos = w.wp[pattern].loop_end;
+        else if(pos <= 0)
+            next_pos = LENGTH;
+        else next_pos--;
+        cut_pos = 0;
+    }
+    else if(w.wp[pattern].step_mode == mDrunk) {	// DRUNK
+        drunk_step += (rnd() % 3) - 1; // -1 to 1
+        if(drunk_step < -1) drunk_step = -1;
+        else if(drunk_step > 1) drunk_step = 1;
+
+        next_pos += drunk_step;
+        if(next_pos < 0)
+            next_pos = LENGTH;
+        else if(next_pos > LENGTH)
+            next_pos = 0;
+        else if(w.wp[pattern].loop_dir == 1 && next_pos < w.wp[pattern].loop_start)
+            next_pos = w.wp[pattern].loop_end;
+        else if(w.wp[pattern].loop_dir == 1 && next_pos > w.wp[pattern].loop_end)
+            next_pos = w.wp[pattern].loop_start;
+        else if(w.wp[pattern].loop_dir == 2 && next_pos < w.wp[pattern].loop_start && next_pos > w.wp[pattern].loop_end) {
+            if(drunk_step == 1)
+                next_pos = w.wp[pattern].loop_start;
+            else
+                next_pos = w.wp[pattern].loop_end;
+        }
+
+        cut_pos = 1;
+    }
+    else if(w.wp[pattern].step_mode == mRandom) {	// RANDOM
+        next_pos = (rnd() % (w.wp[pattern].loop_len + 1)) + w.wp[pattern].loop_start;
+        // print_dbg("\r\nnext pos:");
+        // print_dbg_ulong(next_pos);
+        if(next_pos > LENGTH) next_pos -= LENGTH + 1;
+        cut_pos = 1;
+    }
+
+    // next pattern?
+    if(pos == w.wp[pattern].loop_end && w.wp[pattern].step_mode == mForward) {
+        if(edit_mode == mSeries)
+            series_jump++;
+        else if(next_pattern != pattern)
+            pattern_jump++;
+    }
+    else if(pos == w.wp[pattern].loop_start && w.wp[pattern].step_mode == mReverse) {
+        if(edit_mode == mSeries)
+            series_jump++;
+        else if(next_pattern != pattern)
+            pattern_jump++;
+    }
+    else if(series_step == w.wp[pattern].loop_len) {
+        series_jump++;
+    }
+
+    if(edit_mode == mSeries)
+        series_step++;
+
+    monomeFrameDirty++;
+
+
+    // PARAM 0
+    if((rnd() % 255) < w.wp[pattern].cv_probs[0][pos] && w.cv_mute[0]) {
+        if(w.wp[pattern].cv_mode[0] == 0) {
+            cv0 = w.wp[pattern].cv_curves[0][pos];
+        }
+        else {
+            count = 0;
+            for(i1=0;i1<16;i1++)
+                if(w.wp[pattern].cv_steps[0][pos] & (1<<i1)) {
+                    found[count] = i1;
+                    count++;
+                }
+            if(count == 1)
+                cv_chosen[0] = found[0];
+            else
+                cv_chosen[0] = found[rnd() % count];
+            cv0 = w.wp[pattern].cv_values[cv_chosen[0]];
+        }
+    }
+
+    // PARAM 1
+    if((rnd() % 255) < w.wp[pattern].cv_probs[1][pos] && w.cv_mute[1]) {
+        if(w.wp[pattern].cv_mode[1] == 0) {
+            cv1 = w.wp[pattern].cv_curves[1][pos];
+        }
+        else {
+            count = 0;
+            for(i1=0;i1<16;i1++)
+                if(w.wp[pattern].cv_steps[1][pos] & (1<<i1)) {
+                    found[count] = i1;
+                    count++;
+                }
+            if(count == 1)
+                cv_chosen[1] = found[0];
+            else
+                cv_chosen[1] = found[rnd() % count];
+
+            cv1 = w.wp[pattern].cv_values[cv_chosen[1]];
+        }
+    }
+
+
+    // write to DAC
+    spi_selectChip(SPI,DAC_SPI);
+        // spi_write(SPI,0x39);	// update both
+    spi_write(SPI,0x31);	// update A
+    // spi_write(SPI,0x38);	// update B
+    // spi_write(SPI,pos*15);	// send position
+    // spi_write(SPI,0);
+    spi_write(SPI,cv0>>4);
+    spi_write(SPI,cv0<<4);
+    spi_unselectChip(SPI,DAC_SPI);
+
+    spi_selectChip(SPI,DAC_SPI);
+    spi_write(SPI,0x38);	// update B
+    spi_write(SPI,cv1>>4);
+    spi_write(SPI,cv1<<4);
+    spi_unselectChip(SPI,DAC_SPI);
+}
+
+
 void clock(u8 phase) {
-	static u8 i1, count;
-	static u16 found[16];
+    static u8 i1, count;
+    static u16 found[16];
 
+    // clock pulse
 	if(phase) {
-		gpio_set_gpio_pin(B10);
-
-
-		if(pattern_jump) {
-			pattern = next_pattern;
-			next_pos = w.wp[pattern].loop_start;
-			pattern_jump = 0;
-		}
-		// for series mode and delayed pattern change
-		if(series_jump) {
-			series_pos = series_next;
-			if(series_pos == w.series_end)
-				series_next = w.series_start;
-			else {
-				series_next++;
-				if(series_next>63)
-					series_next = w.series_start;
-			}
-
-			// print_dbg("\r\nSERIES next ");
-			// print_dbg_ulong(series_next);
-			// print_dbg(" pos ");
-			// print_dbg_ulong(series_pos);
-
-			count = 0;
-			for(i1=0;i1<16;i1++) {
-				if((w.series_list[series_pos] >> i1) & 1) {
-					found[count] = i1;
-					count++;
-				}
-			}
-
-			if(count == 1)
-				next_pattern = found[0];
-			else {
-
-				next_pattern = found[rnd()%count];
-			}
-
-			pattern = next_pattern;
-			series_playing = pattern;
-			if(w.wp[pattern].step_mode == mReverse)
-				next_pos = w.wp[pattern].loop_end;
-			else
-				next_pos = w.wp[pattern].loop_start;
-
-			series_jump = 0;
-			series_step = 0;
-		}
-
-		pos = next_pos;
-
-		// live param record
-		if(param_accept && live_in) {
-			param_dest = &w.wp[pattern].cv_curves[edit_cv_ch][pos];
-			w.wp[pattern].cv_curves[edit_cv_ch][pos] = adc[1];
-		}
-
-		// calc next step
-		if(w.wp[pattern].step_mode == mForward) { 		// FORWARD
-			if(pos == w.wp[pattern].loop_end) next_pos = w.wp[pattern].loop_start;
-			else if(pos >= LENGTH) next_pos = 0;
-			else next_pos++;
-			cut_pos = 0;
-		}
-		else if(w.wp[pattern].step_mode == mReverse) {	// REVERSE
-			if(pos == w.wp[pattern].loop_start)
-				next_pos = w.wp[pattern].loop_end;
-			else if(pos <= 0)
-				next_pos = LENGTH;
-			else next_pos--;
-			cut_pos = 0;
-		}
-		else if(w.wp[pattern].step_mode == mDrunk) {	// DRUNK
-			drunk_step += (rnd() % 3) - 1; // -1 to 1
-			if(drunk_step < -1) drunk_step = -1;
-			else if(drunk_step > 1) drunk_step = 1;
-
-			next_pos += drunk_step;
-			if(next_pos < 0) 
-				next_pos = LENGTH;
-			else if(next_pos > LENGTH) 
-				next_pos = 0;
-			else if(w.wp[pattern].loop_dir == 1 && next_pos < w.wp[pattern].loop_start)
-				next_pos = w.wp[pattern].loop_end;
-			else if(w.wp[pattern].loop_dir == 1 && next_pos > w.wp[pattern].loop_end)
-				next_pos = w.wp[pattern].loop_start;
-			else if(w.wp[pattern].loop_dir == 2 && next_pos < w.wp[pattern].loop_start && next_pos > w.wp[pattern].loop_end) {
-				if(drunk_step == 1)
-					next_pos = w.wp[pattern].loop_start;
-				else
-					next_pos = w.wp[pattern].loop_end;
-			}
-
-			cut_pos = 1;
- 		}
-		else if(w.wp[pattern].step_mode == mRandom) {	// RANDOM
-			next_pos = (rnd() % (w.wp[pattern].loop_len + 1)) + w.wp[pattern].loop_start;
-			// print_dbg("\r\nnext pos:");
-			// print_dbg_ulong(next_pos);
-			if(next_pos > LENGTH) next_pos -= LENGTH + 1;
-			cut_pos = 1;
-		}
-
-		// next pattern?
-		if(pos == w.wp[pattern].loop_end && w.wp[pattern].step_mode == mForward) {
-			if(edit_mode == mSeries) 
-				series_jump++;
-			else if(next_pattern != pattern)
-				pattern_jump++;
-		}
-		else if(pos == w.wp[pattern].loop_start && w.wp[pattern].step_mode == mReverse) {
-			if(edit_mode == mSeries) 
-				series_jump++;
-			else if(next_pattern != pattern)
-				pattern_jump++;
-		}
-		else if(series_step == w.wp[pattern].loop_len) {
-			series_jump++;
-		}
-
-		if(edit_mode == mSeries)
-			series_step++;
-
-
-		// TRIGGER
-		triggered = 0;
-		if((rnd() % 255) < w.wp[pattern].step_probs[pos]) {
-			
-			if(w.wp[pattern].step_choice & 1<<pos) {
-				count = 0;
-				for(i1=0;i1<4;i1++)
-					if(w.wp[pattern].steps[pos] >> i1 & 1) {
-						found[count] = i1;
-						count++;
-					}
-
-				if(count == 0)
-					triggered = 0;
-				else if(count == 1)
-					triggered = 1<<found[0];
-				else
-					triggered = 1<<found[rnd()%count];
-			}	
-			else {
-				triggered = w.wp[pattern].steps[pos];
-			}
-			
-			if(w.wp[pattern].tr_mode == 0) {
-				if(triggered & 0x1 && w.tr_mute[0]) gpio_set_gpio_pin(B00);
-				if(triggered & 0x2 && w.tr_mute[1]) gpio_set_gpio_pin(B01);
-				if(triggered & 0x4 && w.tr_mute[2]) gpio_set_gpio_pin(B02);
-				if(triggered & 0x8 && w.tr_mute[3]) gpio_set_gpio_pin(B03);
-			} else {
-				if(w.tr_mute[0]) {
-					if(triggered & 0x1) gpio_set_gpio_pin(B00);
-					else gpio_clr_gpio_pin(B00);
-				}
-				if(w.tr_mute[1]) {
-					if(triggered & 0x2) gpio_set_gpio_pin(B01);
-					else gpio_clr_gpio_pin(B01);
-				}
-				if(w.tr_mute[2]) {
-					if(triggered & 0x4) gpio_set_gpio_pin(B02);
-					else gpio_clr_gpio_pin(B02);
-				}
-				if(w.tr_mute[3]) {
-					if(triggered & 0x8) gpio_set_gpio_pin(B03);
-					else gpio_clr_gpio_pin(B03);
-				}
-
-			}
-		}
-
-		monomeFrameDirty++;
-
-
-		// PARAM 0
-		if((rnd() % 255) < w.wp[pattern].cv_probs[0][pos] && w.cv_mute[0]) {
-			if(w.wp[pattern].cv_mode[0] == 0) {
-				cv0 = w.wp[pattern].cv_curves[0][pos];
-			}
-			else {
-				count = 0;
-				for(i1=0;i1<16;i1++)
-					if(w.wp[pattern].cv_steps[0][pos] & (1<<i1)) {
-						found[count] = i1;
-						count++;
-					}
-				if(count == 1) 
-					cv_chosen[0] = found[0];
-				else
-					cv_chosen[0] = found[rnd() % count];
-				cv0 = w.wp[pattern].cv_values[cv_chosen[0]];			
-			}
-		}
-
-		// PARAM 1
-		if((rnd() % 255) < w.wp[pattern].cv_probs[1][pos] && w.cv_mute[1]) {
-			if(w.wp[pattern].cv_mode[1] == 0) {
-				cv1 = w.wp[pattern].cv_curves[1][pos];
-			}
-			else {
-				count = 0;
-				for(i1=0;i1<16;i1++)
-					if(w.wp[pattern].cv_steps[1][pos] & (1<<i1)) {
-						found[count] = i1;
-						count++;
-					}
-				if(count == 1) 
-					cv_chosen[1] = found[0];
-				else
-					cv_chosen[1] = found[rnd() % count];
-
-				cv1 = w.wp[pattern].cv_values[cv_chosen[1]];			
-			}
-		}
-
-
-		// write to DAC
-		spi_selectChip(SPI,DAC_SPI);
-		 // spi_write(SPI,0x39);	// update both
-		spi_write(SPI,0x31);	// update A
-		// spi_write(SPI,0x38);	// update B
-		// spi_write(SPI,pos*15);	// send position
- 		// spi_write(SPI,0);
- 		spi_write(SPI,cv0>>4);
- 		spi_write(SPI,cv0<<4);
-		spi_unselectChip(SPI,DAC_SPI);
-
-		spi_selectChip(SPI,DAC_SPI);
-		spi_write(SPI,0x38);	// update B
-		spi_write(SPI,cv1>>4);
-		spi_write(SPI,cv1<<4);
-		spi_unselectChip(SPI,DAC_SPI);
+        trigger_pulse(&tr_row_1);
+        trigger_pulse(&tr_row_2);
+        trigger_pulse(&tr_row_3);
+        trigger_pulse(&tr_row_4);
+        cv_pulse(i1, count, found);
 	}
 	else {
+        // clock led pin
 		gpio_clr_gpio_pin(B10);
 
+        // CLEAR TRIGGERS IF YOU SHOULD TURN THEM OFF
 		if(w.wp[pattern].tr_mode == 0) {
+            // Clock a...b pin
 			gpio_clr_gpio_pin(B00);
 			gpio_clr_gpio_pin(B01);
 			gpio_clr_gpio_pin(B02);
 			gpio_clr_gpio_pin(B03);
 		}
  	}
-
-	// print_dbg("\r\n pos: ");
-	// print_dbg_ulong(pos);
 }
 
 
@@ -458,8 +1049,7 @@ static softTimer_t monomePollTimer = { .next = NULL, .prev = NULL };
 static softTimer_t monomeRefreshTimer  = { .next = NULL, .prev = NULL };
 
 
-
-static void clockTimer_callback(void* o) {  
+static void clockTimer_callback(void* o) {
 	// static event_t e;
 	// e.type = kEventTimer;
 	// e.data = 0;
@@ -473,14 +1063,14 @@ static void clockTimer_callback(void* o) {
 	}
 }
 
-static void keyTimer_callback(void* o) {  
+static void keyTimer_callback(void* o) {
 	static event_t e;
 	e.type = kEventKeyTimer;
 	e.data = 0;
 	event_post(&e);
 }
 
-static void adcTimer_callback(void* o) {  
+static void adcTimer_callback(void* o) {
 	static event_t e;
 	e.type = kEventPollADC;
 	e.data = 0;
@@ -506,16 +1096,14 @@ static void monome_refresh_timer_callback(void* obj) {
 
 // monome: start polling
 void timers_set_monome(void) {
-	// print_dbg("\r\n setting monome timers");
 	timer_add(&monomePollTimer, 20, &monome_poll_timer_callback, NULL );
 	timer_add(&monomeRefreshTimer, 30, &monome_refresh_timer_callback, NULL );
 }
 
 // monome stop polling
 void timers_unset_monome(void) {
-	// print_dbg("\r\n unsetting monome timers");
 	timer_remove( &monomePollTimer );
-	timer_remove( &monomeRefreshTimer ); 
+	timer_remove( &monomeRefreshTimer );
 }
 
 
@@ -524,7 +1112,7 @@ void timers_unset_monome(void) {
 // event handlers
 
 static void handler_FtdiConnect(s32 data) { ftdi_setup(); }
-static void handler_FtdiDisconnect(s32 data) { 
+static void handler_FtdiDisconnect(s32 data) {
 	timers_unset_monome();
 	// event_t e = { .type = kEventMonomeDisconnect };
 	// event_post(&e);
@@ -532,7 +1120,7 @@ static void handler_FtdiDisconnect(s32 data) {
 
 static void handler_MonomeConnect(s32 data) {
 	u8 i1;
-	// print_dbg("\r\n// monome connect /////////////////"); 
+	// print_dbg("\r\n// monome connect /////////////////");
 	keycount_pos = 0;
 	key_count = 0;
 	SIZE = monome_size_x();
@@ -543,16 +1131,15 @@ static void handler_MonomeConnect(s32 data) {
 	// print_dbg("\r monome vari: ");
 	// print_dbg_ulong(VARI);
 
+    // Use the varibright refresh only when monome is varibright
 	if(VARI) re = &refresh;
 	else re = &refresh_mono;
 
+    // set the loop end to the size of the monome per looper
 	for(i1=0;i1<16;i1++)
 		if(w.wp[i1].loop_end > LENGTH)
 			w.wp[i1].loop_end = LENGTH;
-	
 
-	// monome_set_quadrant_flag(0);
-	// monome_set_quadrant_flag(1);
 	timers_set_monome();
 }
 
@@ -695,18 +1282,18 @@ static void handler_KeyTimer(s32 data) {
 				}
 			}
 
-			// print_dbg("\rlong press: "); 
+			// print_dbg("\rlong press: ");
 			// print_dbg_ulong(held_keys[i1]);
 		}
 	}
 }
 
 static void handler_ClockNormal(s32 data) {
-	clock_external = !gpio_get_pin_value(B09); 
+	clock_external = !gpio_get_pin_value(B09);
 }
 
 static void handler_ClockExt(s32 data) {
-	clock(data); 
+	clock(data);
 }
 
 
@@ -716,15 +1303,14 @@ static void handler_ClockExt(s32 data) {
 ////////////////////////////////////////////////////////////////////////////////
 // application grid code
 
-static void handler_MonomeGridKey(s32 data) { 
-	u8 x, y, z, index, i1, found, count;
-	s16 delta;
+static void handler_MonomeGridKey(s32 data) {
+	u8 x, y, z, index, i1, found;
 	monome_grid_key_parse_event_data(data, &x, &y, &z);
-	// print_dbg("\r\n monome event; x: "); 
-	// print_dbg_hex(x); 
-	// print_dbg("; y: 0x"); 
-	// print_dbg_hex(y); 
-	// print_dbg("; z: 0x"); 
+	// print_dbg("\r\n monome event; x: ");
+	// print_dbg_hex(x);
+	// print_dbg("; y: 0x");
+	// print_dbg_hex(y);
+	// print_dbg("; z: 0x");
 	// print_dbg_hex(z);
 
 	//// TRACK LONG PRESSES
@@ -736,9 +1322,9 @@ static void handler_MonomeGridKey(s32 data) {
 	} else {
 		found = 0; // "found"
 		for(i1 = 0; i1<key_count; i1++) {
-			if(held_keys[i1] == index) 
+			if(held_keys[i1] == index)
 				found++;
-			if(found) 
+			if(found)
 				held_keys[i1] = held_keys[i1+1];
 		}
 		key_count--;
@@ -781,7 +1367,7 @@ static void handler_MonomeGridKey(s32 data) {
 		// glyph magic
 		if(z && x>7) {
 			glyph[y] ^= 1<<(x-8);
-			monomeFrameDirty++;	
+			monomeFrameDirty++;
 		}
 	}
 	// NOT PRESET
@@ -791,10 +1377,12 @@ static void handler_MonomeGridKey(s32 data) {
 		//// SORT
 
 		// cut position
+        // Second row
+        // TODO: break this into cut for main track and a cut for separate tracks
 		if(y == 1) {
 			keycount_pos += z * 2 - 1;
 			if(keycount_pos < 0) keycount_pos = 0;
-			// print_dbg("\r\nkeycount: "); 
+			// print_dbg("\r\nkeycount: ");
 			// print_dbg_ulong(keycount_pos);
 
 			if(keycount_pos == 1 && z) {
@@ -836,7 +1424,7 @@ static void handler_MonomeGridKey(s32 data) {
 					else if(x == 2 ) {
 						next_pos = (rnd() % (w.wp[pattern].loop_len + 1)) + w.wp[pattern].loop_start;
 						cut_pos = 1;
-						monomeFrameDirty++;					
+						monomeFrameDirty++;
 					}
 				}
 			}
@@ -853,379 +1441,28 @@ static void handler_MonomeGridKey(s32 data) {
 	 			if(w.wp[pattern].loop_dir == 2)
 	 				w.wp[pattern].loop_len = (LENGTH - w.wp[pattern].loop_start) + w.wp[pattern].loop_end + 1;
 
-				// print_dbg("\r\nloop_len: "); 
+				// print_dbg("\r\nloop_len: ");
 				// print_dbg_ulong(w.wp[pattern].loop_len);
 			}
 		}
 
-		// top row
+		// top row branch
 		else if(y == 0) {
-			if(x == LENGTH) {
-				key_alt = z;
-				if(z == 0) {
-					param_accept = 0;
-					live_in = 0;
-				}
-				monomeFrameDirty++;
-			}
-			else if(x < 4 && z) {
-				if(key_alt)
-					w.wp[pattern].tr_mode ^= 1;
-				else if(key_meta)
-					w.tr_mute[x] ^= 1;
-				else 
-					edit_mode = mTrig;
-				edit_prob = 0;
-				param_accept = 0;
-				monomeFrameDirty++;
-			}
-			else if(SIZE==16 && x > 3 && x < 12 && z) {
-				param_accept = 0;
-				edit_cv_ch = (x-4)/4;
-				edit_prob = 0;
-
-				if(key_alt)
-					w.wp[pattern].cv_mode[edit_cv_ch] ^= 1;
-				else if(key_meta)
-					w.cv_mute[edit_cv_ch] ^= 1;
-				else
-					edit_mode = mMap;
-
-				monomeFrameDirty++;
-			}
-			else if(SIZE==8 && (x == 4 || x == 5) && z) {
-				param_accept = 0;
-				edit_cv_ch = x-4;
-				edit_mode = mMap;
-				edit_prob = 0;
-
-				if(key_alt)
-					w.wp[pattern].cv_mode[edit_cv_ch] ^= 1;
-				else if(key_meta)
-					w.cv_mute[edit_cv_ch] ^= 1;
-
-				monomeFrameDirty++;
-			}
-			else if(x == LENGTH-1 && z && key_alt) {
-				edit_mode = mSeries;
-				monomeFrameDirty++;
-			}
-			else if(x == LENGTH-1)
-				key_meta = z;
+            handle_top_row_mode_select(x, y, z);
 		}
-
-
 		// toggle steps and prob control
 		else if(edit_mode == mTrig) {
-			if(z && y>3 && edit_prob == 0) {
-				if(key_alt)
-					w.wp[pattern].steps[pos] |=  1 << (y-4);
-				else if(key_meta) {
-					w.wp[pattern].step_choice ^= (1<<x);
-				}
-				else
-					w.wp[pattern].steps[x] ^= (1<<(y-4));
-				monomeFrameDirty++;
-			}
-			// step probs
-			else if(z && y==3) {
-				if(key_alt)
-					edit_prob = 1;
-				else {
-					if(w.wp[pattern].step_probs[x] == 255) w.wp[pattern].step_probs[x] = 0;
-					else w.wp[pattern].step_probs[x] = 255;
-				}	
-				monomeFrameDirty++;
-			}
-			else if(edit_prob == 1) {
-				if(z) {
-					if(y == 4) w.wp[pattern].step_probs[x] = 192;
-					else if(y == 5) w.wp[pattern].step_probs[x] = 128;
-					else if(y == 6) w.wp[pattern].step_probs[x] = 64;
-					else w.wp[pattern].step_probs[x] = 0;
-				}
-			}
-		}	
-		
+            handle_trigger_mode_press(x, y, z);
+		}
 		// edit map and probs
 		else if(edit_mode == mMap) {
-			// step probs
-			if(z && y==3) {
-				if(key_alt)
-					edit_prob = 1;
-				else  {
-					if(w.wp[pattern].cv_probs[edit_cv_ch][x] == 255) w.wp[pattern].cv_probs[edit_cv_ch][x] = 0;
-					else w.wp[pattern].cv_probs[edit_cv_ch][x] = 255;
-				}
-					
-				monomeFrameDirty++;
-			}
-			// edit data
-			else if(edit_prob == 0) {
-				// CURVES
-				if(w.wp[pattern].cv_mode[edit_cv_ch] == 0) {
-					if(y == 4 && z) {
-						if(center) 
-							delta = 3;
-						else if(key_alt)
-							delta = 409;
-						else						
-							delta = 34;
-
-						if(key_meta == 0) {
-							// saturate
-							if(w.wp[pattern].cv_curves[edit_cv_ch][x] + delta < 4092)
-								w.wp[pattern].cv_curves[edit_cv_ch][x] += delta;
-							else
-								w.wp[pattern].cv_curves[edit_cv_ch][x] = 4092;
-						}
-						else {
-							for(i1=0;i1<16;i1++) {
-								// saturate
-								if(w.wp[pattern].cv_curves[edit_cv_ch][i1] + delta < 4092)
-									w.wp[pattern].cv_curves[edit_cv_ch][i1] += delta;
-								else
-									w.wp[pattern].cv_curves[edit_cv_ch][i1] = 4092;
-							}
-						}
-					}
-					else if(y == 6 && z) {
-						if(center)
-							delta = 3;
-						else if(key_alt)
-							delta = 409;
-						else
-							delta = 34;
-
-						if(key_meta == 0) {
-							// saturate
-							if(w.wp[pattern].cv_curves[edit_cv_ch][x] > delta)
-								w.wp[pattern].cv_curves[edit_cv_ch][x] -= delta;
-							else
-								w.wp[pattern].cv_curves[edit_cv_ch][x] = 0;
-						}
-						else {
-							for(i1=0;i1<16;i1++) {
-								// saturate
-								if(w.wp[pattern].cv_curves[edit_cv_ch][i1] > delta)
-									w.wp[pattern].cv_curves[edit_cv_ch][i1] -= delta;
-								else
-									w.wp[pattern].cv_curves[edit_cv_ch][i1] = 0;
-							}
-						}
-
-					}
-					else if(y == 5) {
-						if(z == 1) {
-	 						center = 1;
-	 						if(quantize_in)
-	 							quantize_in = 0;
-	 						else if(key_alt)
-								w.wp[pattern].cv_curves[edit_cv_ch][x] = clip;
-							else
-								clip = w.wp[pattern].cv_curves[edit_cv_ch][x];
-						}
-						else
-							center = 0;
-					}
-					else if(y == 7) {
-						if(key_alt && z) {
-							param_dest = &w.wp[pattern].cv_curves[edit_cv_ch][pos];
-							w.wp[pattern].cv_curves[edit_cv_ch][pos] = (adc[1] / 34) * 34;
-							quantize_in = 1;
-							param_accept = 1;
-							live_in = 1;
-						}
-						else if(center && z) {
-							if(key_meta == 0) 
-								w.wp[pattern].cv_curves[edit_cv_ch][x] = rand() % ((adc[1] / 34) * 34 + 1);
-							else {
-								for(i1=0;i1<16;i1++) {
-									w.wp[pattern].cv_curves[edit_cv_ch][i1] = rand() % ((adc[1] / 34) * 34 + 1);
-								}
-							}
-						}
-						else {
-							param_accept = z;
-							param_dest = &w.wp[pattern].cv_curves[edit_cv_ch][x];
-							if(z) {
-								w.wp[pattern].cv_curves[edit_cv_ch][x] = (adc[1] / 34) * 34;
-								quantize_in = 1;
-							}
-							else
-								quantize_in = 0;
-						}
-						monomeFrameDirty++;
-					}
-				}
-				// MAP
-				else {
-					if(scale_select && z) {
-						// index -= 64;
-						index = (y-4) * 8 + x;
-						if(index < 24 && y<8) {
-							for(i1=0;i1<16;i1++)
-								w.wp[pattern].cv_values[i1] = SCALES[index][i1];
-							print_dbg("\rNEW SCALE ");
-							print_dbg_ulong(index);
-						}
-
-						scale_select = 0;
-						monomeFrameDirty++;
-					}
-					else {
-						if(z && y==4) {
-							edit_cv_step = x;
-							count = 0;
-							for(i1=0;i1<16;i1++)
-									if((w.wp[pattern].cv_steps[edit_cv_ch][edit_cv_step] >> i1) & 1) {
-										count++;
-										edit_cv_value = i1;
-									}
-							if(count>1)
-								edit_cv_value = -1;
-
-							keycount_cv = 0;
-
-							monomeFrameDirty++;
-						}
-						// load scale
-						else if(key_alt && y==7 && x == 0 && z) {
-							scale_select++;
-							monomeFrameDirty++;
-						}
-						// read pot					
-						else if(y==7 && key_alt && edit_cv_value != -1 && x==LENGTH) {
-							param_accept = z;
-							param_dest = &(w.wp[pattern].cv_values[edit_cv_value]);
-							// print_dbg("\r\nparam: ");
-							// print_dbg_ulong(*param_dest);
-						}
-						else if((y == 5 || y == 6) && z && x<4 && edit_cv_step != -1) {
-							delta = 0;
-	 						if(x == 0)
-								delta = 409;
-							else if(x == 1)
-								delta = 239;
-							else if(x == 2)
-								delta = 34;
-							else if(x == 3)
-								delta = 3;
-
-							if(y == 6)
-								delta *= -1;
-							
-							if(key_alt) {
-								for(i1=0;i1<16;i1++) {
-									if(w.wp[pattern].cv_values[i1] + delta > 4092)
-										w.wp[pattern].cv_values[i1] = 4092;
-									else if(delta < 0 && w.wp[pattern].cv_values[i1] < -1*delta)
-										w.wp[pattern].cv_values[i1] = 0;
-									else
-										w.wp[pattern].cv_values[i1] += delta;
-								}
-							}
-							else {
-								if(w.wp[pattern].cv_values[edit_cv_value] + delta > 4092)
-									w.wp[pattern].cv_values[edit_cv_value] = 4092;
-								else if(delta < 0 && w.wp[pattern].cv_values[edit_cv_value] < -1*delta)
-									w.wp[pattern].cv_values[edit_cv_value] = 0;
-								else
-									w.wp[pattern].cv_values[edit_cv_value] += delta;
-							}
-
-							monomeFrameDirty++;
-						}
-						// choose values
-						else if(y==7) {
-							keycount_cv += z*2-1;
-							if(keycount_cv < 0)
-								keycount_cv = 0;
-
-							if(z) {
-								count = 0;
-								for(i1=0;i1<16;i1++)
-									if((w.wp[pattern].cv_steps[edit_cv_ch][edit_cv_step] >> i1) & 1)
-										count++;
-
-								// single press toggle
-								if(keycount_cv == 1 && count < 2) {
-									w.wp[pattern].cv_steps[edit_cv_ch][edit_cv_step] = (1<<x);
-									edit_cv_value = x;
-								}
-								// multiselect
-								else if(keycount_cv > 1 || count > 1) {
-									w.wp[pattern].cv_steps[edit_cv_ch][edit_cv_step] ^= (1<<x);
-
-									if(!w.wp[pattern].cv_steps[edit_cv_ch][edit_cv_step])
-										w.wp[pattern].cv_steps[edit_cv_ch][edit_cv_step] = (1<<x);
-
-									count = 0;
-									for(i1=0;i1<16;i1++)
-										if((w.wp[pattern].cv_steps[edit_cv_ch][edit_cv_step] >> i1) & 1) {
-											count++;
-											edit_cv_value = i1;
-										}
-
-									if(count > 1)
-										edit_cv_value = -1;
-								}
-
-								monomeFrameDirty++;
-							}
-						}
-					}
-				}
-			}
-			else if(edit_prob == 1) {
-				if(z) {
-					if(y == 4) w.wp[pattern].cv_probs[edit_cv_ch][x] = 192;
-					else if(y == 5) w.wp[pattern].cv_probs[edit_cv_ch][x] = 128;
-					else if(y == 6) w.wp[pattern].cv_probs[edit_cv_ch][x] = 64;
-					else w.wp[pattern].cv_probs[edit_cv_ch][x] = 0;
-				}
-			}
+            // FIXME: don't need index probably
+            handle_map_mode_press(x, y, z, index);
 		}
-
 		// series mode
 		else if(edit_mode == mSeries) {
-			if(z && key_alt) {
-				if(x == 0)
-					series_next = y-2+scroll_pos;
-				else if(x == LENGTH-1)
-					w.series_start = y-2+scroll_pos;
-				else if(x == LENGTH)
-					w.series_end = y-2+scroll_pos;
-
-				if(w.series_end < w.series_start)
-					w.series_end = w.series_start;
-			}
-			else {
-				keycount_series += z*2-1;
-				if(keycount_series < 0)
-					keycount_series = 0;
-
-				if(z) {
-					count = 0;
-					for(i1=0;i1<16;i1++)
-						count += (w.series_list[y-2+scroll_pos] >> i1) & 1;
-
-					// single press toggle
-					if(keycount_series == 1 && count < 2) {
-						w.series_list[y-2+scroll_pos] = (1<<x);
-					}
-					// multi-select
-					else if(keycount_series > 1 || count > 1) {
-						w.series_list[y-2+scroll_pos] ^= (1<<x);
-
-						// ensure not fully clear
-						if(!w.series_list[y-2+scroll_pos])
-							w.series_list[y-2+scroll_pos] = (1<<x);
-					}
-				}
-			}
-
-			monomeFrameDirty++;
+            // FIXME: don't need index probably
+            handle_series_mode_press(x, y, z, index);
 		}
 	}
 }
@@ -1313,11 +1550,12 @@ static void refresh() {
 	}
 
 	// show pos loop dim
-	if(w.wp[pattern].loop_dir) {	
+    // TODO: this diffs on tape head movement, is confusing
+	if(w.wp[pattern].loop_dir) {
 		for(i1=0;i1<SIZE;i1++) {
 			if(w.wp[pattern].loop_dir == 1 && i1 >= w.wp[pattern].loop_start && i1 <= w.wp[pattern].loop_end)
 				monomeLedBuffer[16+i1] = 4;
-			else if(w.wp[pattern].loop_dir == 2 && (i1 <= w.wp[pattern].loop_end || i1 >= w.wp[pattern].loop_start)) 
+			else if(w.wp[pattern].loop_dir == 2 && (i1 <= w.wp[pattern].loop_end || i1 >= w.wp[pattern].loop_start))
 				monomeLedBuffer[16+i1] = 4;
 		}
 	}
@@ -1333,14 +1571,24 @@ static void refresh() {
 	// show step data
 	if(edit_mode == mTrig) {
 		if(edit_prob == 0) {
-			for(i1=0;i1<SIZE;i1++) {
-	 			for(i2=0;i2<4;i2++) {
-					if((w.wp[pattern].steps[i1] & (1<<i2)) && i1 == pos && (triggered & 1<<i2) && w.tr_mute[i2]) monomeLedBuffer[(i2+4)*16+i1] = 11;
-					else if(w.wp[pattern].steps[i1] & (1<<i2) && (w.wp[pattern].step_choice & 1<<i1)) monomeLedBuffer[(i2+4)*16+i1] = 4;
-					else if(w.wp[pattern].steps[i1] & (1<<i2)) monomeLedBuffer[(i2+4)*16+i1] = 7;
-					else if(i1 == pos) monomeLedBuffer[(i2+4)*16+i1] = 4;
-					else monomeLedBuffer[(i2+4)*16+i1] = 0;
-				}
+
+
+            new_draw_trigger_row(0, &tr_row_1);
+            new_draw_trigger_row(1, &tr_row_2);
+            new_draw_trigger_row(2, &tr_row_3);
+            new_draw_trigger_row(3, &tr_row_4);
+
+			// 0..15, 0..3
+            for(i1=0;i1<SIZE;i1++) {
+                 // this interface should be
+                 // new_draw_trigger_row(tr_row_1);
+                 // new_draw_trigger_row(tr_row_2);
+                 // new_draw_trigger_row(tr_row_3);
+                 // new_draw_trigger_row(tr_row_4);
+                 /* draw_trigger_row(i1, 0); */
+                 /* draw_trigger_row(i1, 1); */
+                 /* draw_trigger_row(i1, 2); */
+                 /* draw_trigger_row(i1, 3); */
 
 				// probs
 				if(w.wp[pattern].step_probs[i1] == 255) monomeLedBuffer[48+i1] = 11;
@@ -1349,21 +1597,14 @@ static void refresh() {
 		}
 		else if(edit_prob == 1) {
 			for(i1=0;i1<SIZE;i1++) {
-				monomeLedBuffer[64+i1] = 4;
-				monomeLedBuffer[80+i1] = 4;
-				monomeLedBuffer[96+i1] = 4;
-				monomeLedBuffer[112+i1] = 4;
 
-				if(w.wp[pattern].step_probs[i1] == 255)
-					monomeLedBuffer[48+i1] = 11;
-				else if(w.wp[pattern].step_probs[i1] == 0) {
-					monomeLedBuffer[48+i1] = 0;
-					monomeLedBuffer[112+i1] = 7;
-				}
-				else if(w.wp[pattern].step_probs[i1]) {
-					monomeLedBuffer[48+i1] = 4;
-					monomeLedBuffer[64+16*(3-(w.wp[pattern].step_probs[i1]>>6))+i1] = 7;
-				}
+                // draw probabilities by offset
+                /* draw_trigger_probabilities(tr_row_1); */
+                /* draw_trigger_probabilities(tr_row_2); */
+                /* draw_trigger_probabilities(tr_row_3); */
+                /* draw_trigger_probabilities(tr_row_4); */
+                draw_trigger_probabilities(i1);
+
 			}
 		}
 	}
@@ -1437,9 +1678,9 @@ static void refresh() {
 						if(w.wp[pattern].cv_probs[edit_cv_ch][i1] == 255) monomeLedBuffer[48+i1] = 11;
 						else if(w.wp[pattern].cv_probs[edit_cv_ch][i1] > 0) monomeLedBuffer[48+i1] = 7;
 
-						monomeLedBuffer[64+i1] = (i1<8) * 4;						
-						monomeLedBuffer[80+i1] = (i1<8) * 4;						
-						monomeLedBuffer[96+i1] = (i1<8) * 4;						
+						monomeLedBuffer[64+i1] = (i1<8) * 4;
+						monomeLedBuffer[80+i1] = (i1<8) * 4;
+						monomeLedBuffer[96+i1] = (i1<8) * 4;
 						monomeLedBuffer[112+i1] = 0;
 					}
 
@@ -1481,7 +1722,7 @@ static void refresh() {
 
 			// scroll position helper
 			monomeLedBuffer[32+i1*16+((scroll_pos+i1)/(64/SIZE))] = 4;
-			
+
 			// sidebar selection indicators
 			if(i1+scroll_pos > w.series_start && i1+scroll_pos < w.series_end) {
 				monomeLedBuffer[32+i1*16] = 4;
@@ -1663,9 +1904,9 @@ static void refresh_mono() {
 						// probs
 						if(w.wp[pattern].cv_probs[edit_cv_ch][i1] > 0) monomeLedBuffer[48+i1] = 11;
 
-						monomeLedBuffer[64+i1] = 0;						
-						monomeLedBuffer[80+i1] = 0;						
-						monomeLedBuffer[96+i1] = 0;						
+						monomeLedBuffer[64+i1] = 0;
+						monomeLedBuffer[80+i1] = 0;
+						monomeLedBuffer[96+i1] = 0;
 						monomeLedBuffer[112+i1] = 0;
 					}
 
@@ -1707,7 +1948,7 @@ static void refresh_mono() {
 
 			// scroll position helper
 			// monomeLedBuffer[32+i1*16+((scroll_pos+i1)/(64/SIZE))] = 4;
-			
+
 			// sidebar selection indicators
 			if((key_meta || key_alt) && i1+scroll_pos > w.series_start && i1+scroll_pos < w.series_end) {
 				monomeLedBuffer[32+i1*16] = 11;
@@ -2058,6 +2299,19 @@ int main(void)
 		for(i1=0;i1<8;i1++)
 			glyph[i1] = flashy.glyph[preset_select][i1];
 	}
+
+    set_tr_defaults(&tr_row_1);
+    set_tr_defaults(&tr_row_2);
+    set_tr_defaults(&tr_row_3);
+    set_tr_defaults(&tr_row_4);
+    /* tr_row_1.loop_end = 3; */
+    /* tr_row_2.loop_end = 7; */
+    /* tr_row_3.loop_end = 5; */
+    /* tr_row_4.loop_end = 2; */
+    tr_row_1.pin = B00;
+    tr_row_2.pin = B01;
+    tr_row_3.pin = B02;
+    tr_row_4.pin = B03;
 
 	LENGTH = 15;
 	SIZE = 16;
