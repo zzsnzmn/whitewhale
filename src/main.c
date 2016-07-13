@@ -70,7 +70,7 @@ const u16 SCALES[24][16] = {
 };
 
 typedef enum {
-	mTrig, mMap, mSeries
+	mTrig, mMap, mIsomorph, mSeries, mSeriesA, mSeriesB
 } edit_modes;
 
 typedef enum {
@@ -224,7 +224,6 @@ void flash_read(void);
 // initializers
 //
 void set_tr_defaults(tr_row *t);
-
 void set_tr_defaults(tr_row *t) {
 	/* whale_pattern wp[16]; */
 	/* u16 series_list[64]; */
@@ -282,28 +281,9 @@ void draw_trigger_probabilities(u8 i1) {
     }
 }
 
-// 0..15, 0..3
-
-void draw_trigger_row(u8 i1, u8 i2);
-void draw_trigger_row(u8 i1, u8 i2) {
-    // XXX: this feels like a mess
-
-    // if note is active
-    if((w.wp[pattern].steps[i1] & (1<<i2)) && i1 == pos && (triggered & 1<<i2) && w.tr_mute[i2]) monomeLedBuffer[(i2+4)*16+i1] = 11;
-    // XXX: don't quite know what's happening here
-    // Need to decipher this I imagine it's related to step possibilities
-    else if(w.wp[pattern].steps[i1] & (1<<i2) && (w.wp[pattern].step_choice & 1<<i1)) monomeLedBuffer[(i2+4)*16+i1] = 4;
-    // draw notes that are pressed but not active
-    else if(w.wp[pattern].steps[i1] & (1<<i2)) monomeLedBuffer[(i2+4)*16+i1] = 7;
-    // draw tape head
-    else if(i1 == pos) monomeLedBuffer[(i2+4)*16+i1] = 4;
-    // clear out notes if they are not active
-    else monomeLedBuffer[(i2+4)*16+i1] = 0;
-}
-
 // TODO: delete other draw trigger row
-void new_draw_trigger_row(u8 i2, tr_row *t);
-void new_draw_trigger_row(u8 i2, tr_row *t) {
+void draw_trigger_row(u8 i2, tr_row *t);
+void draw_trigger_row(u8 i2, tr_row *t) {
     u8 i1;
     for(i1=0;i1<SIZE;i1++) {
         // if(t.steps[i1] && i1 == t.pos && (triggered & 1<<i2) /*&& w.tr_mute[i2]*/) monomeLedBuffer[(i2+4)*16+i1] = 11;
@@ -756,6 +736,10 @@ void handle_top_row_mode_select(u8 x, u8 y, u8 z) {
 		param_accept = 0;
 		monomeFrameDirty++;
 	}
+    // Toggle isomorphic keyboard mode
+	else if(SIZE==16 && x == 4 && z) {
+        edit_mode = mIsomorph;
+    }
 	else if(SIZE==16 && x > 3 && x < 12 && z) {
 		param_accept = 0;
 		edit_cv_ch = (x-4)/4;
@@ -797,8 +781,6 @@ void handle_top_row_mode_select(u8 x, u8 y, u8 z) {
 void trigger_pulse(tr_row *t);
 void trigger_pulse(tr_row *t) {
 	t->pos++;
-    // TODO
-    // This should track the individual start position
     if(t->pos > t->loop_end) t->pos = t->loop_start;
 
     /* triggered = 0; */
@@ -1571,24 +1553,17 @@ static void refresh() {
 	// show step data
 	if(edit_mode == mTrig) {
 		if(edit_prob == 0) {
-
-
-            new_draw_trigger_row(0, &tr_row_1);
-            new_draw_trigger_row(1, &tr_row_2);
-            new_draw_trigger_row(2, &tr_row_3);
-            new_draw_trigger_row(3, &tr_row_4);
-
+            draw_trigger_row(0, &tr_row_1);
+            draw_trigger_row(1, &tr_row_2);
+            draw_trigger_row(2, &tr_row_3);
+            draw_trigger_row(3, &tr_row_4);
 			// 0..15, 0..3
             for(i1=0;i1<SIZE;i1++) {
                  // this interface should be
-                 // new_draw_trigger_row(tr_row_1);
-                 // new_draw_trigger_row(tr_row_2);
-                 // new_draw_trigger_row(tr_row_3);
-                 // new_draw_trigger_row(tr_row_4);
-                 /* draw_trigger_row(i1, 0); */
-                 /* draw_trigger_row(i1, 1); */
-                 /* draw_trigger_row(i1, 2); */
-                 /* draw_trigger_row(i1, 3); */
+                 // draw_trigger_row(tr_row_1);
+                 // draw_trigger_row(tr_row_2);
+                 // draw_trigger_row(tr_row_3);
+                 // draw_trigger_row(tr_row_4);
 
 				// probs
 				if(w.wp[pattern].step_probs[i1] == 255) monomeLedBuffer[48+i1] = 11;
@@ -2304,10 +2279,6 @@ int main(void)
     set_tr_defaults(&tr_row_2);
     set_tr_defaults(&tr_row_3);
     set_tr_defaults(&tr_row_4);
-    /* tr_row_1.loop_end = 3; */
-    /* tr_row_2.loop_end = 7; */
-    /* tr_row_3.loop_end = 5; */
-    /* tr_row_4.loop_end = 2; */
     tr_row_1.pin = B00;
     tr_row_2.pin = B01;
     tr_row_3.pin = B02;
