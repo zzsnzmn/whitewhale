@@ -43,3 +43,4 @@
 
 # zzbiz
 tmp/
+.syntastic_c_config
