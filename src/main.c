@@ -731,6 +731,99 @@ void trigger_pulse(tr_row *t) {
     monomeFrameDirty++;
 }
 
+
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+// drawing funcitons
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+
+// clear our the top four rows
+// top, cut, pattern, prob??
+void clear_top_rows(void);
+void clear_top_rows() {
+	u8 i1;
+    for(i1=0;i1<16;i1++) {
+        monomeLedBuffer[i1] = 0;
+        monomeLedBuffer[16+i1] = 0;
+        monomeLedBuffer[32+i1] = 4;
+        monomeLedBuffer[48+i1] = 0;
+    }
+}
+
+void draw_active_mode(void);
+void draw_active_mode() {
+	if(edit_mode == mTrig) {
+		monomeLedBuffer[0] = 4;
+		monomeLedBuffer[1] = 4;
+		monomeLedBuffer[2] = 4;
+		monomeLedBuffer[3] = 4;
+	}
+	else if(edit_mode == mMap) {
+		if(SIZE==16) {
+			monomeLedBuffer[4+(edit_cv_ch*4)] = 4;
+			monomeLedBuffer[5+(edit_cv_ch*4)] = 4;
+			monomeLedBuffer[6+(edit_cv_ch*4)] = 4;
+			monomeLedBuffer[7+(edit_cv_ch*4)] = 4;
+		}
+		else
+			monomeLedBuffer[4+edit_cv_ch] = 4;
+	}
+	else if(edit_mode == mSeries) {
+		monomeLedBuffer[LENGTH-1] = 7;
+	}
+}
+
+void draw_cv_mutes(void);
+void draw_cv_mutes() {
+    // Draws the CV/Trigger mutes when meta is held down
+	if(key_meta) {
+		if(SIZE==16) {
+			if(w.cv_mute[0]) {
+				monomeLedBuffer[4] = 11;
+				monomeLedBuffer[5] = 11;
+				monomeLedBuffer[6] = 11;
+				monomeLedBuffer[7] = 11;
+			}
+			if(w.cv_mute[1]) {
+				monomeLedBuffer[8] = 11;
+				monomeLedBuffer[9] = 11;
+				monomeLedBuffer[10] = 11;
+				monomeLedBuffer[11] = 11;
+			}
+		}
+		else {
+			if(w.cv_mute[0])
+				monomeLedBuffer[4] = 11;
+			if(w.cv_mute[1])
+				monomeLedBuffer[5] = 11;
+		}
+
+	}
+	else if(SIZE==16) {
+		monomeLedBuffer[cv0 / 1024 + 4] = 11;
+		monomeLedBuffer[cv1 / 1024 + 8] = 11;
+	}
+
+}
+
+
+
+
+
+
+
+
+
+
 ////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
@@ -739,10 +832,6 @@ void trigger_pulse(tr_row *t) {
 
 void cv_pulse(u8 i1, u8 count, u16 found[]);
 void cv_pulse(u8 i1, u8 count, u16 found[]) {
-    /* static u8 i1, count; */
-    /* static u16 found[16]; */
-    /* u8 count; */
-    /* u16 found[]; */
     // new step
     gpio_set_gpio_pin(B10);
 
@@ -1386,85 +1475,38 @@ static void handler_MonomeGridKey(s32 data) {
 
 ////////////////////////////////////////////////////////////////////////////////
 // application grid redraw
+//
+// FIXME: only functions only support vari
 static void refresh() {
 	u8 i1,i2;
 
 
 	// clear top, cut, pattern, prob
-	for(i1=0;i1<16;i1++) {
-		monomeLedBuffer[i1] = 0;
-		monomeLedBuffer[16+i1] = 0;
-		monomeLedBuffer[32+i1] = 4;
-		monomeLedBuffer[48+i1] = 0;
-	}
-
+    clear_top_rows();
 	// dim mode
-	if(edit_mode == mTrig) {
-		monomeLedBuffer[0] = 4;
-		monomeLedBuffer[1] = 4;
-		monomeLedBuffer[2] = 4;
-		monomeLedBuffer[3] = 4;
-	}
-	else if(edit_mode == mMap) {
-		if(SIZE==16) {
-			monomeLedBuffer[4+(edit_cv_ch*4)] = 4;
-			monomeLedBuffer[5+(edit_cv_ch*4)] = 4;
-			monomeLedBuffer[6+(edit_cv_ch*4)] = 4;
-			monomeLedBuffer[7+(edit_cv_ch*4)] = 4;
-		}
-		else
-			monomeLedBuffer[4+edit_cv_ch] = 4;
-	}
-	else if(edit_mode == mSeries) {
-		monomeLedBuffer[LENGTH-1] = 7;
-	}
+    draw_active_mode();
 
 	// alt
 	monomeLedBuffer[LENGTH] = 4;
 	if(key_alt) monomeLedBuffer[LENGTH] = 11;
 
 	// show mutes or on steps
-	if(key_meta) {
-		if(w.tr_mute[0]) monomeLedBuffer[0] = 11;
-		if(w.tr_mute[1]) monomeLedBuffer[1] = 11;
-		if(w.tr_mute[2]) monomeLedBuffer[2] = 11;
-		if(w.tr_mute[3]) monomeLedBuffer[3] = 11;
-	}
-	else if(triggered) {
-		if(triggered & 0x1 && w.tr_mute[0]) monomeLedBuffer[0] = 11 - 4 * w.wp[pattern].tr_mode;
-		if(triggered & 0x2 && w.tr_mute[1]) monomeLedBuffer[1] = 11 - 4 * w.wp[pattern].tr_mode;
-		if(triggered & 0x4 && w.tr_mute[2]) monomeLedBuffer[2] = 11 - 4 * w.wp[pattern].tr_mode;
-		if(triggered & 0x8 && w.tr_mute[3]) monomeLedBuffer[3] = 11 - 4 * w.wp[pattern].tr_mode;
-	}
+    // Need to make this not use the global triggered stuff
+	/* if(key_meta) { */
+		/* if(w.tr_mute[0]) monomeLedBuffer[0] = 11; */
+		/* if(w.tr_mute[1]) monomeLedBuffer[1] = 11; */
+		/* if(w.tr_mute[2]) monomeLedBuffer[2] = 11; */
+		/* if(w.tr_mute[3]) monomeLedBuffer[3] = 11; */
+	/* } */
+	/* else if(triggered) { */
+		/* if(triggered & 0x1 && w.tr_mute[0]) monomeLedBuffer[0] = 11 - 4 * w.wp[pattern].tr_mode; */
+		/* if(triggered & 0x2 && w.tr_mute[1]) monomeLedBuffer[1] = 11 - 4 * w.wp[pattern].tr_mode; */
+		/* if(triggered & 0x4 && w.tr_mute[2]) monomeLedBuffer[2] = 11 - 4 * w.wp[pattern].tr_mode; */
+		/* if(triggered & 0x8 && w.tr_mute[3]) monomeLedBuffer[3] = 11 - 4 * w.wp[pattern].tr_mode; */
+	/* } */
 
 	// cv indication
-	if(key_meta) {
-		if(SIZE==16) {
-			if(w.cv_mute[0]) {
-				monomeLedBuffer[4] = 11;
-				monomeLedBuffer[5] = 11;
-				monomeLedBuffer[6] = 11;
-				monomeLedBuffer[7] = 11;
-			}
-			if(w.cv_mute[1]) {
-				monomeLedBuffer[8] = 11;
-				monomeLedBuffer[9] = 11;
-				monomeLedBuffer[10] = 11;
-				monomeLedBuffer[11] = 11;
-			}
-		}
-		else {
-			if(w.cv_mute[0])
-				monomeLedBuffer[4] = 11;
-			if(w.cv_mute[1])
-				monomeLedBuffer[5] = 11;
-		}
-
-	}
-	else if(SIZE==16) {
-		monomeLedBuffer[cv0 / 1024 + 4] = 11;
-		monomeLedBuffer[cv1 / 1024 + 8] = 11;
-	}
+    draw_cv_mutes();
 
 	// show pos loop dim
     // TODO: this diffs on tape head movement, is confusing
