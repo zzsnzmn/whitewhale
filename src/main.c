@@ -34,6 +34,8 @@
 #include "conf_board.h"
 #include "ii.h"
 
+#include "tr_row.h"
+
 
 #define FIRSTRUN_KEY 0x22
 
@@ -142,40 +144,6 @@ u8 series_step;
 u16 adc[4];
 u8 SIZE, LENGTH, VARI;
 
-///////////////////////////////////////////////////////
-// tmp delcarations for tr (drum) mode
-typedef struct {
-	/* whale_pattern wp[16]; */
-	/* u16 series_list[64]; */
-	/* u8 series_start, series_end; */
-
-	u8 loop_start;
-    u8 loop_end;
-    u8 loop_len;
-    u8 loop_dir; // unused
-	u16 step_choice;
-	u8 tr_mode;
-	/* step_modes step_mode; */
-	u8 steps[16];
-	u8 step_probs[16];
-	u8 cv_probs[2][16];
-
-    s8 pos;
-    s8 cut_pos;
-    s8 next_pos;
-    s8 drunk_step;
-    s8 triggered;
-    u8 mute;
-    u8 pattern;
-    u8 next_pattern;
-    u8 pattern_jump;
-    u8 pin;
-
-    u8 held_keys;
-    u8 first_press;
-
-} tr_row;
-
 // This might be easier to deal with as indexes
 tr_row tr_row_1;
 tr_row tr_row_2;
@@ -223,39 +191,6 @@ void flash_read(void);
 
 // initializers
 //
-void set_tr_defaults(tr_row *t);
-void set_tr_defaults(tr_row *t) {
-	/* whale_pattern wp[16]; */
-	/* u16 series_list[64]; */
-	/* u8 series_start, series_end; */
-
-	t->loop_start = 0;
-    t->loop_end = 15;
-    t->loop_len = 15;
-    t->loop_dir = 0; // unused
-	t->step_choice = 0;
-	t->tr_mode = 0;
-    for (int i = 0; i < 16; i++) {
-        t->steps[i] = 0;
-    }
-	// u8 t.step_probs[16];
-	// u16 t.cv_values[16];
-	// u16 t.cv_steps[2][16];
-	// u16 t.cv_curves[2][16];
-	// u8 t.cv_probs[2][16];
-
-    t->held_keys = 0;
-    t->first_press = 0;
-    t->pos = pos;
-    t->cut_pos = 0;
-    t->next_pos = 0;
-    t->drunk_step = 0;
-    t->triggered = 0 ;
-    t->mute = 1;
-    t->pattern = 0;
-    t->next_pattern = 0;
-    t->pattern_jump = 0;
-}
 
 
 
