@@ -36,6 +36,8 @@
 
 #include "tr_row.h"
 
+#include "key_maps.h"
+
 
 #define FIRSTRUN_KEY 0x22
 
@@ -70,6 +72,8 @@ const u16 SCALES[24][16] = {
 {0, 372, 681, 937, 1150, 1325, 1471, 1592, 1692, 1775, 1844, 1901, 1948, 1987, 2020, 2047}		// exp-ish 5v
 
 };
+
+
 
 typedef enum {
 	mTrig, mMap, mIsomorph, mSeries, mSeriesA, mSeriesB
@@ -674,6 +678,13 @@ void handle_top_row_mode_select(u8 x, u8 y, u8 z) {
     // Toggle isomorphic keyboard mode
 	else if(SIZE==16 && x == 4 && z) {
         edit_mode = mIsomorph;
+        /* XXX: implement this */
+        /* clear out the tr row so that you can */
+        /* play real time */
+        /* clear_tr_row(&tr_row_1); */
+
+        /* XXX: implement this */
+        /* when changing to this mode we should clear out the bottom 5 row */
     }
 	else if(SIZE==16 && x > 3 && x < 12 && z) {
 		param_accept = 0;
@@ -767,6 +778,14 @@ void draw_active_mode() {
 		monomeLedBuffer[2] = 4;
 		monomeLedBuffer[3] = 4;
 	}
+	else if(edit_mode == mIsomorph) {
+        monomeLedBuffer[0] = 4;
+        monomeLedBuffer[1] = 4;
+        monomeLedBuffer[2] = 8;
+        monomeLedBuffer[3] = 8;
+        monomeLedBuffer[4] = 10;
+        monomeLedBuffer[5] = 10;
+    }
 	else if(edit_mode == mMap) {
 		if(SIZE==16) {
 			monomeLedBuffer[4+(edit_cv_ch*4)] = 4;
@@ -814,13 +833,6 @@ void draw_cv_mutes() {
 	}
 
 }
-
-
-
-
-
-
-
 
 
 
@@ -956,7 +968,10 @@ void cv_pulse(u8 i1, u8 count, u16 found[]) {
 
 
     // PARAM 0
-    if((rnd() % 255) < w.wp[pattern].cv_probs[0][pos] && w.cv_mute[0]) {
+    if(edit_mode == mIsomorph) {
+
+    }
+    else if((rnd() % 255) < w.wp[pattern].cv_probs[0][pos] && w.cv_mute[0]) {
         if(w.wp[pattern].cv_mode[0] == 0) {
             cv0 = w.wp[pattern].cv_curves[0][pos];
         }
@@ -1470,13 +1485,25 @@ static void handler_MonomeGridKey(s32 data) {
             // FIXME: don't need index probably
             handle_series_mode_press(x, y, z, index);
 		}
+		else if(edit_mode == mIsomorph) {
+            /* right here it makes sense to break this out into a separate function that handles  */
+            /* updating the cv out potentially and then also redrawing */
+            if(z != 0) {
+                key_count++;
+                cv0 = FOURTHS_GRID_MAP[y ^ 7][x];
+                monomeLedBuffer[y * 16 + x] = 15;
+            } else {
+                monomeLedBuffer[y * 16 + x] = 0;
+                key_count--;
+            }
+		}
 	}
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 // application grid redraw
 //
-// FIXME: only functions only support vari
+// FIXME: functions only support vari
 static void refresh() {
 	u8 i1,i2;
 
