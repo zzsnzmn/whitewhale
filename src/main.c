@@ -196,29 +196,6 @@ void flash_read(void);
 //
 
 
-
-
-// XXX: david prototypes
-// TECH: don't care about this feature too much
-void draw_trigger_probabilities(u8 i1);
-void draw_trigger_probabilities(u8 i1) {
-    monomeLedBuffer[64+i1] = 4;
-    monomeLedBuffer[80+i1] = 4;
-    monomeLedBuffer[96+i1] = 4;
-    monomeLedBuffer[112+i1] = 4;
-
-    if(w.wp[pattern].step_probs[i1] == 255)
-        monomeLedBuffer[48+i1] = 11;
-    else if(w.wp[pattern].step_probs[i1] == 0) {
-        monomeLedBuffer[48+i1] = 0;
-        monomeLedBuffer[112+i1] = 7;
-    }
-    else if(w.wp[pattern].step_probs[i1]) {
-        monomeLedBuffer[48+i1] = 4;
-        monomeLedBuffer[64+16*(3-(w.wp[pattern].step_probs[i1]>>6))+i1] = 7;
-    }
-}
-
 // TODO: delete other draw trigger row
 void draw_trigger_row(u8 i2, tr_row *t);
 void draw_trigger_row(u8 i2, tr_row *t) {
@@ -255,21 +232,7 @@ void handle_trigger_mode_press(u8 x, u8 y, u8 z) {
     }
     // step probs
     else if(z && y==3) {
-        if(key_alt)
-            edit_prob = 1;
-        else {
-            if(w.wp[pattern].step_probs[x] == 255) w.wp[pattern].step_probs[x] = 0;
-            else w.wp[pattern].step_probs[x] = 255;
-        }
-        monomeFrameDirty++;
-    }
-    else if(edit_prob == 1) {
-        if(z) {
-            if(y == 4) w.wp[pattern].step_probs[x] = 192;
-            else if(y == 5) w.wp[pattern].step_probs[x] = 128;
-            else if(y == 6) w.wp[pattern].step_probs[x] = 64;
-            else w.wp[pattern].step_probs[x] = 0;
-        }
+        // taking this out might cause triggers to not happen
     }
 
     // TODO: dry this up
@@ -413,13 +376,8 @@ void handle_map_mode_press(u8 x, u8 y, u8 z, u8 index) {
 	s16 delta;
 	// step probs
 	if(z && y==3) {
-		if(key_alt)
-			edit_prob = 1;
-		else  {
-			if(w.wp[pattern].cv_probs[edit_cv_ch][x] == 255) w.wp[pattern].cv_probs[edit_cv_ch][x] = 0;
-			else w.wp[pattern].cv_probs[edit_cv_ch][x] = 255;
-		}
-
+        if(w.wp[pattern].cv_probs[edit_cv_ch][x] == 255) w.wp[pattern].cv_probs[edit_cv_ch][x] = 0;
+        else w.wp[pattern].cv_probs[edit_cv_ch][x] = 255;
 		monomeFrameDirty++;
 	}
 	// edit data
@@ -639,14 +597,6 @@ void handle_map_mode_press(u8 x, u8 y, u8 z, u8 index) {
 			}
 		}
 	}
-	else if(edit_prob == 1) {
-		if(z) {
-			if(y == 4) w.wp[pattern].cv_probs[edit_cv_ch][x] = 192;
-			else if(y == 5) w.wp[pattern].cv_probs[edit_cv_ch][x] = 128;
-			else if(y == 6) w.wp[pattern].cv_probs[edit_cv_ch][x] = 64;
-			else w.wp[pattern].cv_probs[edit_cv_ch][x] = 0;
-		}
-	}
 }
 
 void handle_top_row_mode_select(u8 x, u8 y, u8 z);
@@ -670,7 +620,6 @@ void handle_top_row_mode_select(u8 x, u8 y, u8 z) {
 		else
             // edit_mode is the enum for what is displayed
 			edit_mode = mTrig;
-		edit_prob = 0;
 		param_accept = 0;
 		monomeFrameDirty++;
 	}
@@ -688,7 +637,6 @@ void handle_top_row_mode_select(u8 x, u8 y, u8 z) {
 	else if(SIZE==16 && x > 3 && x < 12 && z) {
 		param_accept = 0;
 		edit_cv_ch = (x-4)/4;
-		edit_prob = 0;
 
 		if(key_alt)
 			w.wp[pattern].cv_mode[edit_cv_ch] ^= 1;
@@ -703,7 +651,6 @@ void handle_top_row_mode_select(u8 x, u8 y, u8 z) {
 		param_accept = 0;
 		edit_cv_ch = x-4;
 		edit_mode = mMap;
-		edit_prob = 0;
 
 		if(key_alt)
             // switches into key vs cv level mode
@@ -1207,14 +1154,14 @@ static void handler_PollADC(s32 data) {
 	clock_temp = i;
 
 	// PARAM POT INPUT
-	if(param_accept && edit_prob) {
-		*param_dest8 = adc[1] >> 4; // scale to 0-255;
+	/* if(param_accept&& edit_prob) { */
+		/* *param_dest8 = adc[1] >> 4; // scale to 0-255; */
 		// print_dbg("\r\nnew prob: ");
 		// print_dbg_ulong(*param_dest8);
 		// print_dbg("\t" );
 		// print_dbg_ulong(adc[1]);
-	}
-	else if(param_accept) {
+	/* } */
+    if(param_accept) {
 		if(quantize_in)
 			*param_dest = (adc[1] / 34) * 34;
 		else
@@ -1555,138 +1502,102 @@ static void refresh() {
 
 	// show step data
 	if(edit_mode == mTrig) {
-		if(edit_prob == 0) {
-            draw_trigger_row(0, &tr_row_1);
-            draw_trigger_row(1, &tr_row_2);
-            draw_trigger_row(2, &tr_row_3);
-            draw_trigger_row(3, &tr_row_4);
-			// 0..15, 0..3
-            for(i1=0;i1<SIZE;i1++) {
-                 // this interface should be
-                 // draw_trigger_row(tr_row_1);
-                 // draw_trigger_row(tr_row_2);
-                 // draw_trigger_row(tr_row_3);
-                 // draw_trigger_row(tr_row_4);
+        draw_trigger_row(0, &tr_row_1);
+        draw_trigger_row(1, &tr_row_2);
+        draw_trigger_row(2, &tr_row_3);
+        draw_trigger_row(3, &tr_row_4);
+		// 0..15, 0..3
+        /* for(i1=0;i1<SIZE;i1++) { */
+             // this interface should be
+             // draw_trigger_row(tr_row_1);
+             // draw_trigger_row(tr_row_2);
+             // draw_trigger_row(tr_row_3);
+             // draw_trigger_row(tr_row_4);
 
-				// probs
-				if(w.wp[pattern].step_probs[i1] == 255) monomeLedBuffer[48+i1] = 11;
-				else if(w.wp[pattern].step_probs[i1] > 0) monomeLedBuffer[48+i1] = 4;
-			}
-		}
-		else if(edit_prob == 1) {
-			for(i1=0;i1<SIZE;i1++) {
-
-                // draw probabilities by offset
-                /* draw_trigger_probabilities(tr_row_1); */
-                /* draw_trigger_probabilities(tr_row_2); */
-                /* draw_trigger_probabilities(tr_row_3); */
-                /* draw_trigger_probabilities(tr_row_4); */
-                draw_trigger_probabilities(i1);
-
-			}
-		}
+			// probs
+			/* if(w.wp[pattern].step_probs[i1] == 255) monomeLedBuffer[48+i1] = 11; */
+			/* else if(w.wp[pattern].step_probs[i1] > 0) monomeLedBuffer[48+i1] = 4; */
+		/* } */
 	}
 
 	// show map
 	else if(edit_mode == mMap) {
-		if(edit_prob == 0) {
-			// CURVES
-			if(w.wp[pattern].cv_mode[edit_cv_ch] == 0) {
+		// CURVES
+		if(w.wp[pattern].cv_mode[edit_cv_ch] == 0) {
+			for(i1=0;i1<SIZE;i1++) {
+				// probs
+				if(w.wp[pattern].cv_probs[edit_cv_ch][i1] == 255) monomeLedBuffer[48+i1] = 11;
+				else if(w.wp[pattern].cv_probs[edit_cv_ch][i1] > 0) monomeLedBuffer[48+i1] = 7;
+
+				monomeLedBuffer[112+i1] = (w.wp[pattern].cv_curves[edit_cv_ch][i1] > 1023) * 7;
+				monomeLedBuffer[96+i1] = (w.wp[pattern].cv_curves[edit_cv_ch][i1] > 2047) * 7;
+				monomeLedBuffer[80+i1] = (w.wp[pattern].cv_curves[edit_cv_ch][i1] > 3071) * 7;
+				monomeLedBuffer[64+i1] = 0;
+				monomeLedBuffer[64+16*(3-(w.wp[pattern].cv_curves[edit_cv_ch][i1]>>10))+i1] = (w.wp[pattern].cv_curves[edit_cv_ch][i1]>>7) & 0x7;
+			}
+
+			// play step highlight
+			monomeLedBuffer[64+pos] += 4;
+			monomeLedBuffer[80+pos] += 4;
+			monomeLedBuffer[96+pos] += 4;
+			monomeLedBuffer[112+pos] += 4;
+		}
+		// MAP
+		else {
+			if(!scale_select) {
 				for(i1=0;i1<SIZE;i1++) {
 					// probs
 					if(w.wp[pattern].cv_probs[edit_cv_ch][i1] == 255) monomeLedBuffer[48+i1] = 11;
 					else if(w.wp[pattern].cv_probs[edit_cv_ch][i1] > 0) monomeLedBuffer[48+i1] = 7;
 
-					monomeLedBuffer[112+i1] = (w.wp[pattern].cv_curves[edit_cv_ch][i1] > 1023) * 7;
-					monomeLedBuffer[96+i1] = (w.wp[pattern].cv_curves[edit_cv_ch][i1] > 2047) * 7;
-					monomeLedBuffer[80+i1] = (w.wp[pattern].cv_curves[edit_cv_ch][i1] > 3071) * 7;
-					monomeLedBuffer[64+i1] = 0;
-					monomeLedBuffer[64+16*(3-(w.wp[pattern].cv_curves[edit_cv_ch][i1]>>10))+i1] = (w.wp[pattern].cv_curves[edit_cv_ch][i1]>>7) & 0x7;
-				}
+					// clear edit select line
+					monomeLedBuffer[64+i1] = 4;
 
-				// play step highlight
-				monomeLedBuffer[64+pos] += 4;
-				monomeLedBuffer[80+pos] += 4;
-				monomeLedBuffer[96+pos] += 4;
-				monomeLedBuffer[112+pos] += 4;
-			}
-			// MAP
-			else {
-				if(!scale_select) {
-					for(i1=0;i1<SIZE;i1++) {
-						// probs
-						if(w.wp[pattern].cv_probs[edit_cv_ch][i1] == 255) monomeLedBuffer[48+i1] = 11;
-						else if(w.wp[pattern].cv_probs[edit_cv_ch][i1] > 0) monomeLedBuffer[48+i1] = 7;
-
-						// clear edit select line
-						monomeLedBuffer[64+i1] = 4;
-
-						// show current edit value, selected
-						if(edit_cv_value != -1) {
-							if((w.wp[pattern].cv_values[edit_cv_value] >> 8) >= i1)
-								monomeLedBuffer[80+i1] = 7;
-							else
-								monomeLedBuffer[80+i1] = 0;
-
-							if(((w.wp[pattern].cv_values[edit_cv_value] >> 4) & 0xf) >= i1)
-								monomeLedBuffer[96+i1] = 4;
-							else
-								monomeLedBuffer[96+i1] = 0;
-						}
-						else {
+					// show current edit value, selected
+					if(edit_cv_value != -1) {
+						if((w.wp[pattern].cv_values[edit_cv_value] >> 8) >= i1)
+							monomeLedBuffer[80+i1] = 7;
+						else
 							monomeLedBuffer[80+i1] = 0;
+
+						if(((w.wp[pattern].cv_values[edit_cv_value] >> 4) & 0xf) >= i1)
+							monomeLedBuffer[96+i1] = 4;
+						else
 							monomeLedBuffer[96+i1] = 0;
-						}
-
-						// show steps
-						if(w.wp[pattern].cv_steps[edit_cv_ch][edit_cv_step] & (1<<i1)) monomeLedBuffer[112+i1] = 7;
-						else monomeLedBuffer[112+i1] = 0;
+					}
+					else {
+						monomeLedBuffer[80+i1] = 0;
+						monomeLedBuffer[96+i1] = 0;
 					}
 
-					// show play position
-					monomeLedBuffer[64+pos] = 7;
-					// show edit position
-					monomeLedBuffer[64+edit_cv_step] = 11;
-					// show playing note
-					monomeLedBuffer[112+cv_chosen[edit_cv_ch]] = 11;
-				}
-				else {
-					for(i1=0;i1<SIZE;i1++) {
-						// probs
-						if(w.wp[pattern].cv_probs[edit_cv_ch][i1] == 255) monomeLedBuffer[48+i1] = 11;
-						else if(w.wp[pattern].cv_probs[edit_cv_ch][i1] > 0) monomeLedBuffer[48+i1] = 7;
-
-						monomeLedBuffer[64+i1] = (i1<8) * 4;
-						monomeLedBuffer[80+i1] = (i1<8) * 4;
-						monomeLedBuffer[96+i1] = (i1<8) * 4;
-						monomeLedBuffer[112+i1] = 0;
-					}
-
-					monomeLedBuffer[112] = 7;
+					// show steps
+					if(w.wp[pattern].cv_steps[edit_cv_ch][edit_cv_step] & (1<<i1)) monomeLedBuffer[112+i1] = 7;
+					else monomeLedBuffer[112+i1] = 0;
 				}
 
+				// show play position
+				monomeLedBuffer[64+pos] = 7;
+				// show edit position
+				monomeLedBuffer[64+edit_cv_step] = 11;
+				// show playing note
+				monomeLedBuffer[112+cv_chosen[edit_cv_ch]] = 11;
 			}
-		}
-		else if(edit_prob == 1) {
-			for(i1=0;i1<SIZE;i1++) {
-				monomeLedBuffer[64+i1] = 4;
-				monomeLedBuffer[80+i1] = 4;
-				monomeLedBuffer[96+i1] = 4;
-				monomeLedBuffer[112+i1] = 4;
+			else {
+				for(i1=0;i1<SIZE;i1++) {
+					// probs
+					if(w.wp[pattern].cv_probs[edit_cv_ch][i1] == 255) monomeLedBuffer[48+i1] = 11;
+					else if(w.wp[pattern].cv_probs[edit_cv_ch][i1] > 0) monomeLedBuffer[48+i1] = 7;
 
-				if(w.wp[pattern].cv_probs[edit_cv_ch][i1] == 255)
-					monomeLedBuffer[48+i1] = 11;
-				else if(w.wp[pattern].cv_probs[edit_cv_ch][i1] == 0) {
-					monomeLedBuffer[48+i1] = 0;
-					monomeLedBuffer[112+i1] = 7;
+					monomeLedBuffer[64+i1] = (i1<8) * 4;
+					monomeLedBuffer[80+i1] = (i1<8) * 4;
+					monomeLedBuffer[96+i1] = (i1<8) * 4;
+					monomeLedBuffer[112+i1] = 0;
 				}
-				else if(w.wp[pattern].cv_probs[edit_cv_ch][i1]) {
-					monomeLedBuffer[48+i1] = 4;
-					monomeLedBuffer[64+16*(3-(w.wp[pattern].cv_probs[edit_cv_ch][i1]>>6))+i1] = 7;
-				}
+
+				monomeLedBuffer[112] = 7;
 			}
-		}
 
+		}
 	}
 
 	// series
@@ -1793,41 +1704,18 @@ static void refresh_mono() {
 
 	// show step data
 	if(edit_mode == mTrig) {
-		if(edit_prob == 0) {
-			for(i1=0;i1<SIZE;i1++) {
-	 			for(i2=0;i2<4;i2++) {
-					if(w.wp[pattern].steps[i1] & (1<<i2)) monomeLedBuffer[(i2+4)*16+i1] = 11;
-					else monomeLedBuffer[(i2+4)*16+i1] = 0;
-				}
-
-				// probs
-				if(w.wp[pattern].step_probs[i1] > 0) monomeLedBuffer[48+i1] = 11;
+		for(i1=0;i1<SIZE;i1++) {
+	 		for(i2=0;i2<4;i2++) {
+				if(w.wp[pattern].steps[i1] & (1<<i2)) monomeLedBuffer[(i2+4)*16+i1] = 11;
+				else monomeLedBuffer[(i2+4)*16+i1] = 0;
 			}
-		}
-		else if(edit_prob == 1) {
-			for(i1=0;i1<SIZE;i1++) {
-				monomeLedBuffer[64+i1] = 0;
-				monomeLedBuffer[80+i1] = 0;
-				monomeLedBuffer[96+i1] = 0;
-				monomeLedBuffer[112+i1] = 0;
-
-				if(w.wp[pattern].step_probs[i1] == 255)
-					monomeLedBuffer[48+i1] = 11;
-				else if(w.wp[pattern].step_probs[i1] == 0) {
-					monomeLedBuffer[48+i1] = 0;
-					monomeLedBuffer[112+i1] = 11;
-				}
-				else if(w.wp[pattern].step_probs[i1]) {
-					monomeLedBuffer[48+i1] = 11;
-					monomeLedBuffer[64+16*(3-(w.wp[pattern].step_probs[i1]>>6))+i1] = 11;
-				}
-			}
+			// probs
+			if(w.wp[pattern].step_probs[i1] > 0) monomeLedBuffer[48+i1] = 11;
 		}
 	}
 
 	// show map
 	else if(edit_mode == mMap) {
-		if(edit_prob == 0) {
 			// CURVES
 			if(w.wp[pattern].cv_mode[edit_cv_ch] == 0) {
 				for(i1=0;i1<SIZE;i1++) {
@@ -1892,27 +1780,6 @@ static void refresh_mono() {
 				}
 
 			}
-		}
-		else if(edit_prob == 1) {
-			for(i1=0;i1<SIZE;i1++) {
-				monomeLedBuffer[64+i1] = 0;
-				monomeLedBuffer[80+i1] = 0;
-				monomeLedBuffer[96+i1] = 0;
-				monomeLedBuffer[112+i1] = 0;
-
-				if(w.wp[pattern].cv_probs[edit_cv_ch][i1] == 255)
-					monomeLedBuffer[48+i1] = 11;
-				else if(w.wp[pattern].cv_probs[edit_cv_ch][i1] == 0) {
-					monomeLedBuffer[48+i1] = 0;
-					monomeLedBuffer[112+i1] = 11;
-				}
-				else if(w.wp[pattern].cv_probs[edit_cv_ch][i1]) {
-					monomeLedBuffer[48+i1] = 11;
-					monomeLedBuffer[64+16*(3-(w.wp[pattern].cv_probs[edit_cv_ch][i1]>>6))+i1] = 11;
-				}
-			}
-		}
-
 	}
 
 	// series
